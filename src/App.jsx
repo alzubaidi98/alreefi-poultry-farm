@@ -32,12 +32,20 @@ import {
   X,
 } from 'lucide-react';
 import {
+  Bird,
+  Receipt,
+  Scale,
+  Skull,
+  Thermometer,
+} from 'lucide-react';
+import {
   DEFAULT_CLEANING_STEPS,
   LOCALIZATION_DICTIONARY,
   TASK_CATEGORY_PREFIXES,
   calculateHouseInventory,
   createInitialFarmState,
   deriveWorkerProfiles,
+  detectActiveShiftForTimestamp,
   gallonsToLiters,
   generateNextJobNumber,
   litersToGallons,
@@ -52,7 +60,8 @@ import Analytics from './components/Analytics.jsx';
 import CropDashboard from './components/CropDashboard.jsx';
 import StorageSettings from './components/StorageSettings.jsx';
 import StaffAttendance from './components/StaffAttendance.jsx';
-import ContractsReports from './components/ContractsReports.jsx';
+import OrdersAndBills from './components/OrdersAndBills.jsx';
+import WeightsAndReports from './components/WeightsAndReports.jsx';
 
 const FarmContext = createContext(null);
 const THEME_STORAGE_KEY = 'alreefi_theme_mode';
@@ -360,7 +369,7 @@ export default function App() {
       setSelectedHouseId(firstAssigned.id);
     }
 
-    if (account.role === 'worker') {
+    if (account.role === 'worker' || account.role === 'supervisor') {
       setActiveView('log');
     } else {
       setActiveView('hub');
@@ -403,10 +412,12 @@ export default function App() {
     const now = new Date();
     const nowIso = now.toISOString();
     const todayStr = nowIso.slice(0, 10);
+    const detectedShift = detectActiveShiftForTimestamp(now, state.settings?.shiftConfig);
     const shiftObj =
+      (state.settings?.shiftConfig?.shifts || []).find((s) => s.id === detectedShift.shiftId) ||
       (state.settings?.shiftConfig?.shifts || []).find((s) => s.id === activeUser.shiftId) ||
       state.settings?.shiftConfig?.shifts?.[0] ||
-      { id: 'shift-day', label: 'Day Shift', startTime: '06:00', endTime: '18:00', hours: 12 };
+      { id: detectedShift.shiftId || 'shift-day', label: detectedShift.label || 'Day Shift', startTime: '06:00', endTime: '18:00', hours: 12 };
 
     const [schedH, schedM] = String(shiftObj.startTime || '06:00')
       .split(':')
@@ -816,39 +827,78 @@ export default function App() {
     const { houseId, harvestedBirds, avgWeightGrams, totalCatchKg, notes } = payload;
     const stepsTemplate = state.settings?.cleaningStepTemplates || DEFAULT_CLEANING_STEPS;
 
-    commitState((prev) => ({
-      ...prev,
-      houses: prev.houses.map((h) =>
-        h.id === houseId
-          ? {
-              ...h,
-              phase: 'cleaning',
-              cycleLabel: 'Cleaning Phase',
-              cleaningDay: 1,
-              manualCountOverride: 0,
-              lastHarvestSummary: {
-                harvestedBirds: Number(harvestedBirds || 0),
-                avgWeightGrams: Number(avgWeightGrams || 0),
-                totalCatchKg: Number(totalCatchKg || 0),
-                completedDate: new Date().toISOString().slice(0, 10),
-                recordedBy: actorName,
-                notes: notes || '',
-              },
-              cleaningSteps: stepsTemplate.map((s) => ({
-                ...s,
-                status: 'pending',
-                completedBy: null,
-                completedAt: null,
-                verifiedBy: null,
-                verifiedAt: null,
-                note: '',
-                photoProof: null,
-              })),
-            }
-          : h
-      ),
-    }));
-    notify('Final catch recorded. House switched to 14-day Cleaning Phase.', 'success');
+    commitState((prev) => {
+      const teamIds = (prev.userAccounts || [])
+        .filter(
+          (u) =>
+            (u.role === 'worker' || u.role === 'supervisor') &&
+            Array.isArray(u.assignedHouseIds) &&
+            u.assignedHouseIds.includes(houseId)
+        )
+        .map((u) => u.id);
+
+      const nextUserAccounts = (prev.userAccounts || []).map((u) => {
+        if ((u.role === 'worker' || u.role === 'supervisor') && Array.isArray(u.assignedHouseIds)) {
+          return {
+            ...u,
+            assignedHouseIds: u.assignedHouseIds.filter((id) => id !== houseId),
+          };
+        }
+        return u;
+      });
+
+      const targetHouse = (prev.houses || []).find((h) => h.id === houseId);
+
+      return {
+        ...prev,
+        userAccounts: nextUserAccounts,
+        houses: (prev.houses || []).map((h) =>
+          h.id === houseId
+            ? {
+                ...h,
+                phase: 'cleaning',
+                cycleLabel: 'Cleaning Phase',
+                cleaningDay: 1,
+                manualCountOverride: 0,
+                previousCycleTeamIds: teamIds.length > 0 ? teamIds : h.previousCycleTeamIds || [],
+                lastHarvestSummary: {
+                  harvestedBirds: Number(harvestedBirds || 0),
+                  avgWeightGrams: Number(avgWeightGrams || 0),
+                  totalCatchKg: Number(totalCatchKg || 0),
+                  completedDate: new Date().toISOString().slice(0, 10),
+                  recordedBy: actorName,
+                  notes: notes || '',
+                },
+                cleaningSteps: stepsTemplate.map((s) => ({
+                  ...s,
+                  status: 'pending',
+                  completedBy: null,
+                  completedAt: null,
+                  verifiedBy: null,
+                  verifiedAt: null,
+                  note: '',
+                  photoProof: null,
+                })),
+              }
+            : h
+        ),
+        auditLogs: [
+          {
+            id: `aud-${Date.now()}`,
+            timestamp: new Date().toISOString(),
+            actor: actorName,
+            role: userRole,
+            action: 'End Cycle & Worker Assignment Reset',
+            details: `${targetHouse?.name || houseId}: Archived ${teamIds.length} assigned worker/supervisor account(s) for 1-click cloning and cleared house permissions.`,
+          },
+          ...(prev.auditLogs || []),
+        ],
+      };
+    });
+    notify(
+      'Final catch recorded. House switched to Cleaning Phase and house staff assignments automatically reset.',
+      'success'
+    );
   };
 
   const startNewFlockCycle = (arg1, arg2) => {
@@ -1591,6 +1641,11 @@ export default function App() {
 
   const submitTaskForVerification = ({ taskId, manualTempC, workerNote, photoProof }) => {
     const nowIso = new Date().toISOString();
+    const hasTemp =
+      manualTempC !== undefined &&
+      manualTempC !== null &&
+      String(manualTempC).trim() !== '' &&
+      !Number.isNaN(Number(manualTempC));
     commitState((prev) => ({
       ...prev,
       tasks: prev.tasks.map((t) =>
@@ -1598,7 +1653,7 @@ export default function App() {
           ? {
               ...t,
               status: 'Submitted',
-              manualTempC: Number(manualTempC),
+              manualTempC: hasTemp ? Number(manualTempC) : t.manualTempC ?? null,
               workerNote: workerNote || '',
               photoProof: photoProof || t.photoProof || null,
               submittedAt: nowIso,
@@ -1713,7 +1768,14 @@ export default function App() {
 
   // --- Weekly Bird Weights (Manager/Owner), Contracts & Reports ---
 
-  const recordWeeklyBirdWeight = ({ houseId, cycleDay, sampleSize = 50, avgGrams, uniformityPct = 85 }) => {
+  const recordWeeklyBirdWeight = ({
+    houseId,
+    cycleDay,
+    sampleSize = 50,
+    avgGrams,
+    uniformityPct = 85,
+    notes = '',
+  }) => {
     const dayNum = Math.max(1, Number(cycleDay || 7));
     const todayStr = new Date().toISOString().slice(0, 10);
     const entry = {
@@ -1722,6 +1784,7 @@ export default function App() {
       sampleSize: Number(sampleSize || 50),
       avgGrams: Number(avgGrams),
       uniformityPct: Number(uniformityPct || 85),
+      notes: notes || '',
       recordedAt: todayStr,
       recordedBy: actorName,
     };
@@ -1836,6 +1899,347 @@ export default function App() {
     }
   };
 
+  // --- V3 Orders & Bills, Dynamic Categories, Recurrence Engine, Silo Sight-Glass & Team Clone ---
+
+  const createOrderBill = ({
+    title,
+    category,
+    quantity,
+    unit,
+    unitPriceAed,
+    totalCostAed,
+    assignedHouseIds = ['ALL'],
+    supplierName = '',
+    managerBillAttachment = null,
+    notes = '',
+  }) => {
+    const existingCount = (state.ordersAndBills || []).length;
+    const nowIso = new Date().toISOString();
+    const created = {
+      id: `ord-${Date.now()}`,
+      orderCode: `ORD-2026-${101 + existingCount}`,
+      title,
+      category,
+      quantity: Number(quantity || 1),
+      unit: unit || 'Units',
+      unitPriceAed: Number(unitPriceAed || 0),
+      totalCostAed: Number(totalCostAed || 0),
+      assignedHouseIds: assignedHouseIds?.length ? assignedHouseIds : ['ALL'],
+      supplierName,
+      requestedBy: actorName,
+      requestedAt: nowIso,
+      managerBillAttachment,
+      status: 'Pending',
+      paidBy: null,
+      paidAt: null,
+      adminInvoiceAttachment: null,
+      paidNote: '',
+      whatsappNotifiedAt: null,
+      notes,
+    };
+
+    commitState((prev) => ({
+      ...prev,
+      ordersAndBills: [created, ...(prev.ordersAndBills || [])],
+      auditLogs: [
+        {
+          id: `aud-${Date.now()}`,
+          timestamp: nowIso,
+          actor: actorName,
+          role: userRole,
+          action: 'Order / Bill Request Submitted',
+          details: `${created.orderCode}: ${created.title} (AED ${created.totalCostAed.toLocaleString()})`,
+        },
+        ...(prev.auditLogs || []),
+      ],
+    }));
+    notify(`Order request ${created.orderCode} created. Notify Super Admin via WhatsApp.`, 'success');
+    return created;
+  };
+
+  const markOrderBillPaid = ({ orderId, adminInvoiceAttachment = null, paidNote = '' }) => {
+    if (userRole !== 'owner') {
+      notify('Only the Super Admin can mark an order or bill as Paid.', 'warning');
+      return;
+    }
+    const nowIso = new Date().toISOString();
+    const target = (state.ordersAndBills || []).find((o) => o.id === orderId);
+    commitState((prev) => ({
+      ...prev,
+      ordersAndBills: (prev.ordersAndBills || []).map((o) =>
+        o.id === orderId
+          ? {
+              ...o,
+              status: 'Paid',
+              paidBy: actorName,
+              paidAt: nowIso,
+              adminInvoiceAttachment: adminInvoiceAttachment || o.adminInvoiceAttachment || null,
+              paidNote: paidNote || o.paidNote || '',
+            }
+          : o
+      ),
+      auditLogs: [
+        {
+          id: `aud-${Date.now()}`,
+          timestamp: nowIso,
+          actor: actorName,
+          role: userRole,
+          action: 'Order / Bill Marked Paid',
+          details: `${target?.orderCode || orderId} marked Paid (AED ${Number(target?.totalCostAed || 0).toLocaleString()}).`,
+        },
+        ...(prev.auditLogs || []),
+      ],
+    }));
+    notify(`${target?.orderCode || 'Bill'} marked as Paid.`, 'success');
+  };
+
+  const recordOrderWhatsappNotified = (orderId) => {
+    const nowIso = new Date().toISOString();
+    commitState((prev) => ({
+      ...prev,
+      ordersAndBills: (prev.ordersAndBills || []).map((o) =>
+        o.id === orderId ? { ...o, whatsappNotifiedAt: nowIso } : o
+      ),
+    }));
+    notify('WhatsApp notification timestamp logged on order.', 'success');
+  };
+
+  const saveHarvestLaborRecord = ({
+    houseId,
+    cycleNumber,
+    workerHeadcount,
+    bonusPerWorkerAed,
+    notes = '',
+  }) => {
+    const headcount = Math.max(0, Number(workerHeadcount || 0));
+    const bonus = Math.max(0, Number(bonusPerWorkerAed || 0));
+    const totalBonusAed = Number((headcount * bonus).toFixed(2));
+    const todayStr = new Date().toISOString().slice(0, 10);
+
+    commitState((prev) => {
+      const existing = (prev.harvestLaborRecords || []).find(
+        (r) => r.houseId === houseId && Number(r.cycleNumber) === Number(cycleNumber)
+      );
+      const nextList = existing
+        ? (prev.harvestLaborRecords || []).map((r) =>
+            r.id === existing.id
+              ? {
+                  ...r,
+                  workerHeadcount: headcount,
+                  bonusPerWorkerAed: bonus,
+                  totalBonusAed,
+                  notes,
+                  recordedBy: actorName,
+                  catchDate: todayStr,
+                }
+              : r
+          )
+        : [
+            {
+              id: `harv-${Date.now()}`,
+              houseId,
+              cycleNumber: Number(cycleNumber || 13),
+              workerHeadcount: headcount,
+              bonusPerWorkerAed: bonus,
+              totalBonusAed,
+              catchDate: todayStr,
+              recordedBy: actorName,
+              notes,
+            },
+            ...(prev.harvestLaborRecords || []),
+          ];
+      return { ...prev, harvestLaborRecords: nextList };
+    });
+    notify(`Saved harvesting crew summary (${headcount} workers • AED ${totalBonusAed.toLocaleString()} total bonuses).`, 'success');
+  };
+
+  const addTaskCategory = ({ prefix, category, color = 'emerald' }) => {
+    const cleanCat = String(category || '').trim();
+    const cleanPrefix = String(prefix || cleanCat.slice(0, 1) || 'T')
+      .trim()
+      .toUpperCase()
+      .slice(0, 2);
+    if (!cleanCat) return;
+    commitState((prev) => ({
+      ...prev,
+      taskCategories: [
+        ...(prev.taskCategories || []),
+        {
+          id: `cat-${Date.now()}`,
+          prefix: cleanPrefix,
+          category: cleanCat,
+          color,
+        },
+      ],
+    }));
+    notify(`Task category "${cleanCat}" (${cleanPrefix}) added.`, 'success');
+  };
+
+  const updateTaskCategory = ({ id, originalCategory, prefix, category, color }) => {
+    const cleanCat = String(category || '').trim();
+    const cleanPrefix = String(prefix || cleanCat.slice(0, 1) || 'T')
+      .trim()
+      .toUpperCase()
+      .slice(0, 2);
+    if (!cleanCat) return;
+    commitState((prev) => ({
+      ...prev,
+      taskCategories: (prev.taskCategories || []).map((c) =>
+        (id && c.id === id) || (!id && c.category === originalCategory)
+          ? { ...c, prefix: cleanPrefix, category: cleanCat, color: color || c.color }
+          : c
+      ),
+    }));
+    notify(`Task category "${cleanCat}" updated.`, 'success');
+  };
+
+  const createRecurringTaskRule = ({
+    templateId = null,
+    title,
+    category = 'Operations',
+    prefix = 'O',
+    houseScope = 'all',
+    targetHouseIds = [],
+    shiftScope = 'all',
+    recurrenceType = 'daily',
+    recurrenceIntervalDays = 1,
+    note = '',
+  }) => {
+    const nowIso = new Date().toISOString();
+    const cleanTitle = String(title || '').trim();
+    if (!cleanTitle) return;
+    const cleanInterval = Math.max(1, Number(recurrenceIntervalDays || 1));
+
+    commitState((prev) => {
+      const count = (prev.recurringTaskRules || []).length + 1;
+      const newRule = {
+        id: `rec-${Date.now()}`,
+        templateId,
+        prefix: String(prefix || 'O').toUpperCase(),
+        category,
+        taskCode: `${String(prefix || 'O').toUpperCase()}-${String(count).padStart(3, '0')}`,
+        title: cleanTitle,
+        houseScope,
+        targetHouseIds:
+          houseScope === 'all'
+            ? (prev.houses || []).filter((h) => !h.archived && h.isActive !== false).map((h) => h.id)
+            : targetHouseIds,
+        shiftScope,
+        recurrenceType,
+        recurrenceIntervalDays: cleanInterval,
+        cycleBound: true,
+        active: true,
+        note,
+        createdBy: actorName,
+        createdAt: nowIso,
+      };
+      return {
+        ...prev,
+        recurringTaskRules: [newRule, ...(prev.recurringTaskRules || [])],
+      };
+    });
+    notify(`Recurring task rule "${cleanTitle}" activated across cycle.`, 'success');
+  };
+
+  const toggleRecurringRuleActive = (ruleId) => {
+    commitState((prev) => ({
+      ...prev,
+      recurringTaskRules: (prev.recurringTaskRules || []).map((r) =>
+        r.id === ruleId ? { ...r, active: !r.active } : r
+      ),
+    }));
+  };
+
+  const completeRecurringTaskInstance = ({ completionKey, ruleId, houseId, note = '' }) => {
+    const nowIso = new Date().toISOString();
+    commitState((prev) => ({
+      ...prev,
+      recurringCompletions: {
+        ...(prev.recurringCompletions || {}),
+        [completionKey]: {
+          ruleId,
+          houseId,
+          completedBy: actorName,
+          completedAt: nowIso,
+          note,
+        },
+      },
+    }));
+    notify('Task marked Done for this shift.', 'success');
+  };
+
+  const recordSiloSightGlassReading = ({
+    houseId,
+    remainingTons,
+    method = 'manual-sight-glass',
+    note = '',
+  }) => {
+    const val = Number(remainingTons);
+    if (Number.isNaN(val) || val < 0) return;
+    const nowIso = new Date().toISOString();
+    commitState((prev) => ({
+      ...prev,
+      houses: (prev.houses || []).map((h) => {
+        if (h.id !== houseId) return h;
+        const prevTons =
+          h.siloSightGlassTons != null
+            ? Number(h.siloSightGlassTons)
+            : Number(((h.siloCurrentKg || 0) / 1000).toFixed(2));
+        const deltaTons = Number((prevTons - val).toFixed(2));
+        const entry = {
+          id: `sr-${Date.now()}`,
+          date: nowIso.slice(0, 10),
+          timestamp: nowIso,
+          readingTons: Number(val.toFixed(2)),
+          deltaTons,
+          source: method,
+          recordedBy: actorName,
+          note,
+        };
+        return {
+          ...h,
+          siloSightGlassTons: Number(val.toFixed(2)),
+          siloCurrentKg: Math.round(val * 1000),
+          siloLastUpdatedAt: nowIso,
+          siloConsumptionHistory: [entry, ...(h.siloConsumptionHistory || [])],
+        };
+      }),
+    }));
+    notify(`Updated Silo sight-glass reading to ${val.toFixed(2)} Tons.`, 'success');
+  };
+
+  const clonePreviousHouseTeam = (houseId) => {
+    const targetHouse = (state.houses || []).find((h) => h.id === houseId);
+    const prevTeam = targetHouse?.previousCycleTeamIds || [];
+    if (prevTeam.length === 0) {
+      notify('No previous cycle team snapshot saved for this house.', 'warning');
+      return;
+    }
+    const nowIso = new Date().toISOString();
+    commitState((prev) => ({
+      ...prev,
+      userAccounts: (prev.userAccounts || []).map((u) => {
+        if (prevTeam.includes(u.id)) {
+          const nextAssigned = Array.from(new Set([...(u.assignedHouseIds || []), houseId]));
+          return { ...u, assignedHouseIds: nextAssigned };
+        }
+        return u;
+      }),
+      auditLogs: [
+        {
+          id: `aud-${Date.now()}`,
+          timestamp: nowIso,
+          actor: actorName,
+          role: userRole,
+          action: 'Cloned Previous Cycle Team',
+          details: `Restored ${prevTeam.length} prior staff account(s) onto ${targetHouse?.name || houseId}.`,
+        },
+        ...(prev.auditLogs || []),
+      ],
+    }));
+    notify(`Restored ${prevTeam.length} previous cycle worker/supervisor account(s) to ${targetHouse?.name || 'house'}.`, 'success');
+  };
+
   const resetDemoData = async () => {
     const fresh = await storageService.resetDemoData();
     setState(fresh);
@@ -1909,14 +2313,27 @@ export default function App() {
     addMedicationLog,
     addIncidentNote,
     acknowledgeIncidentNote,
-    // Tasks & Templates
+    // Tasks, Dynamic Categories & Recurrence Engine
+    addTaskCategory,
+    updateTaskCategory,
+    createRecurringTaskRule,
+    toggleRecurringRuleActive,
+    completeRecurringTaskInstance,
     addTaskTemplate,
     createTask,
     bulkAssignTemplate,
     submitTaskForVerification,
     reviewTask,
-    // Weights, Contracts & Reports
+    // Silos & Cycle Team Cloning
+    recordSiloSightGlassReading,
+    clonePreviousHouseTeam,
+    // Orders & Bills
+    createOrderBill,
+    markOrderBillPaid,
+    recordOrderWhatsappNotified,
+    // Weights, Labor & Reports
     recordWeeklyBirdWeight,
+    saveHarvestLaborRecord,
     saveContractRecord,
     saveReportSchedule,
     dispatchDailyReportNow,
@@ -2285,8 +2702,8 @@ export default function App() {
     );
   }
 
-  // --- 3. ROLE-SCOPED NAVIGATION ---
-  const navItems = [
+  // --- 3. ROLE-SCOPED NAVIGATION & HEADER TELEMETRY DELTAS ---
+  const rawNavItems = [
     {
       id: 'hub',
       label: userRole === 'supervisor' ? langDict.houseOverview : langDict.globalHub,
@@ -2312,23 +2729,26 @@ export default function App() {
     },
     {
       id: 'tasks',
-      label:
-        userRole === 'worker' || userRole === 'supervisor'
-          ? langDict.assignedTasks
-          : langDict.tasks,
+      label: langDict.tasks,
       icon: ClipboardCheck,
-      roles: ['owner', 'manager', 'supervisor', 'worker'],
+      roles: ['owner', 'manager'],
+    },
+    {
+      id: 'orders',
+      label: langDict.ordersBills || 'Orders & Bills',
+      icon: Receipt,
+      roles: ['owner', 'manager'],
+    },
+    {
+      id: 'weights',
+      label: langDict.weightsReports || 'Weights & Reports',
+      icon: Scale,
+      roles: ['owner', 'manager'],
     },
     {
       id: 'analytics',
       label: langDict.analytics,
       icon: BarChart3,
-      roles: ['owner', 'manager'],
-    },
-    {
-      id: 'contracts',
-      label: langDict.contractsReports,
-      icon: FileSpreadsheet,
       roles: ['owner', 'manager'],
     },
     {
@@ -2347,6 +2767,85 @@ export default function App() {
       ? [{ id: 'crops', label: langDict.crops, icon: Sprout, roles: ['owner', 'manager'] }]
       : []),
   ].filter((item) => item.roles.includes(userRole));
+
+  const navItems =
+    userRole === 'supervisor'
+      ? [...rawNavItems].sort((a, b) => (a.id === 'log' ? -1 : b.id === 'log' ? 1 : 0))
+      : rawNavItems;
+
+  const headerTelemetry = (() => {
+    const chicksPerCarton = state.settings?.contractRules?.chicksPerCarton || 100;
+    const cultHouses = (visibleHouses || []).filter(
+      (h) => h.isActive !== false && !h.archived && h.phase !== 'cleaning'
+    );
+    const activeIds = new Set(cultHouses.map((h) => h.id));
+    const liveBirds = cultHouses.reduce(
+      (sum, h) => sum + calculateHouseInventory(h, chicksPerCarton, state.healthLogs || []).activeChicks,
+      0
+    );
+    const activeCycleNum = cultHouses.length
+      ? Math.max(...cultHouses.map((h) => Number(h.cycleNumber || 0)), 13)
+      : 13;
+    const days = cultHouses.map((h) => Number(h.cycleDay || 1));
+    const flockAgeLabel =
+      days.length === 0
+        ? 'Cleaning'
+        : Math.min(...days) === Math.max(...days)
+        ? `Day ${Math.min(...days)}`
+        : `Days ${Math.min(...days)}–${Math.max(...days)}`;
+
+    const logs = (state.healthLogs || []).filter((l) => activeIds.has(l.houseId));
+    const datesDesc = Array.from(new Set(logs.map((l) => l.date).filter(Boolean))).sort((a, b) =>
+      b.localeCompare(a)
+    );
+    const latestDate = datesDesc[0] || '';
+    const prevDate = datesDesc[1] || '';
+
+    const todayLogs = latestDate ? logs.filter((l) => l.date === latestDate) : [];
+    const yesterdayLogs = prevDate ? logs.filter((l) => l.date === prevDate) : [];
+
+    const mortalitiesToday = todayLogs.reduce((s, l) => s + Number(l.mortalities || 0), 0);
+    const cullsToday = todayLogs.reduce((s, l) => s + Number(l.culls || 0), 0);
+    const mortalitiesPrev = prevDate
+      ? yesterdayLogs.reduce((s, l) => s + Number(l.mortalities || 0), 0)
+      : cultHouses.reduce((s, h) => {
+          const ds = h.dailySeries || [];
+          return s + Number(ds.length >= 2 ? ds[ds.length - 2]?.mortalities || 0 : 0);
+        }, 0);
+
+    const avgTempToday = cultHouses.length
+      ? cultHouses.reduce(
+          (s, h) =>
+            s + (Number(h.zones?.start || 0) + Number(h.zones?.middle || 0) + Number(h.zones?.end || 0)) / 3,
+          0
+        ) / cultHouses.length
+      : 0;
+    const avgTempPrev = cultHouses.length
+      ? cultHouses.reduce((s, h) => {
+          const ds = h.dailySeries || [];
+          const fallback =
+            (Number(h.zones?.start || 0) + Number(h.zones?.middle || 0) + Number(h.zones?.end || 0)) / 3;
+          return s + Number(ds.length >= 2 ? ds[ds.length - 2]?.avgTempC ?? fallback : fallback);
+        }, 0) / cultHouses.length
+      : 0;
+
+    return {
+      dateTimeLabel: new Date().toLocaleString(undefined, {
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+      }),
+      activeCycleNum,
+      flockAgeLabel,
+      liveBirds,
+      liveBirdsDelta: -(mortalitiesToday + cullsToday),
+      mortalitiesToday,
+      mortalitiesDelta: mortalitiesToday - mortalitiesPrev,
+      avgTempToday: cultHouses.length ? avgTempToday.toFixed(1) : '—',
+      avgTempDelta: cultHouses.length ? Number((avgTempToday - avgTempPrev).toFixed(1)) : 0,
+    };
+  })();
 
   const currentNavView = navItems.some((n) => n.id === activeView)
     ? activeView
@@ -2521,6 +3020,85 @@ export default function App() {
                 })}
               </div>
             </div>
+
+            {/* Global Telemetry & Day-Over-Day (+/-) Delta Bar for Management & Supervisors */}
+            {(userRole === 'owner' || userRole === 'manager' || userRole === 'supervisor') && (
+              <div className="border-t border-slate-100 bg-slate-50/85 px-4 py-1.5 dark:border-slate-800 dark:bg-slate-950/60">
+                <div className="mx-auto flex max-w-[1440px] flex-wrap items-center justify-between gap-2 text-[11px] font-bold text-slate-700 dark:text-slate-300">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="inline-flex items-center gap-1 rounded-full bg-white px-2.5 py-0.5 text-slate-700 shadow-xs ring-1 ring-slate-200 dark:bg-slate-800 dark:text-slate-200 dark:ring-slate-700">
+                      <Clock className="h-3 w-3 text-emerald-700 dark:text-emerald-400" />
+                      {headerTelemetry.dateTimeLabel}
+                    </span>
+                    <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100/80 px-2.5 py-0.5 font-extrabold text-emerald-950 dark:bg-emerald-900/40 dark:text-emerald-300">
+                      Cycle #{headerTelemetry.activeCycleNum} • {headerTelemetry.flockAgeLabel}
+                    </span>
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="inline-flex items-center gap-1.5 rounded-full bg-white px-2.5 py-0.5 ring-1 ring-slate-200 dark:bg-slate-800 dark:ring-slate-700">
+                      <Bird className="h-3.5 w-3.5 text-emerald-700 dark:text-emerald-400" />
+                      <span>Live Birds:</span>
+                      <strong className="font-black text-slate-900 dark:text-white">
+                        {headerTelemetry.liveBirds.toLocaleString()}
+                      </strong>
+                      <span
+                        className={`rounded-full px-1.5 py-0.5 text-[10px] font-black ${
+                          headerTelemetry.liveBirdsDelta < 0
+                            ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/50 dark:text-amber-300'
+                            : 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300'
+                        }`}
+                      >
+                        {headerTelemetry.liveBirdsDelta >= 0
+                          ? `+${headerTelemetry.liveBirdsDelta}`
+                          : headerTelemetry.liveBirdsDelta}{' '}
+                        vs yest
+                      </span>
+                    </span>
+
+                    <span className="inline-flex items-center gap-1.5 rounded-full bg-white px-2.5 py-0.5 ring-1 ring-slate-200 dark:bg-slate-800 dark:ring-slate-700">
+                      <Skull className="h-3.5 w-3.5 text-rose-600 dark:text-rose-400" />
+                      <span>Mortalities:</span>
+                      <strong className="font-black text-slate-900 dark:text-white">
+                        {headerTelemetry.mortalitiesToday}
+                      </strong>
+                      <span
+                        className={`rounded-full px-1.5 py-0.5 text-[10px] font-black ${
+                          headerTelemetry.mortalitiesDelta > 0
+                            ? 'bg-rose-100 text-rose-800 dark:bg-rose-950/50 dark:text-rose-300'
+                            : 'bg-emerald-100 text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300'
+                        }`}
+                      >
+                        {headerTelemetry.mortalitiesDelta >= 0
+                          ? `+${headerTelemetry.mortalitiesDelta}`
+                          : headerTelemetry.mortalitiesDelta}{' '}
+                        vs yest
+                      </span>
+                    </span>
+
+                    <span className="inline-flex items-center gap-1.5 rounded-full bg-white px-2.5 py-0.5 ring-1 ring-slate-200 dark:bg-slate-800 dark:ring-slate-700">
+                      <Thermometer className="h-3.5 w-3.5 text-sky-600 dark:text-sky-400" />
+                      <span>Avg Temp:</span>
+                      <strong className="font-black text-slate-900 dark:text-white">
+                        {headerTelemetry.avgTempToday}°C
+                      </strong>
+                      <span
+                        className={`rounded-full px-1.5 py-0.5 text-[10px] font-black ${
+                          Math.abs(headerTelemetry.avgTempDelta) >= 1.5
+                            ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/50 dark:text-amber-300'
+                            : 'bg-sky-100 text-sky-800 dark:bg-sky-950/50 dark:text-sky-300'
+                        }`}
+                      >
+                        {headerTelemetry.avgTempDelta >= 0
+                          ? `+${headerTelemetry.avgTempDelta}°C`
+                          : `${headerTelemetry.avgTempDelta}°C`}{' '}
+                        vs yest
+                      </span>
+                    </span>
+                  </div>
+                </div>
+              </div>
+            )}
           </header>
 
           {/* Main Content Viewport */}
@@ -2529,8 +3107,9 @@ export default function App() {
             {currentNavView === 'house' && <PoultryDashboard />}
             {currentNavView === 'log' && <HealthResourceLog />}
             {currentNavView === 'tasks' && <TaskVerification />}
+            {currentNavView === 'orders' && <OrdersAndBills />}
+            {currentNavView === 'weights' && <WeightsAndReports />}
             {currentNavView === 'analytics' && <Analytics />}
-            {currentNavView === 'contracts' && <ContractsReports />}
             {currentNavView === 'staff' && <StaffAttendance />}
             {currentNavView === 'settings' && <StorageSettings />}
             {currentNavView === 'crops' && <CropDashboard />}

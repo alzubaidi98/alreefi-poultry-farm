@@ -1,6 +1,63 @@
 import { createInitialFarmState } from '../mockData.js';
 
-const STORAGE_KEY = 'alreefi_farm_v2_state';
+const STORAGE_KEY = 'alreefi_farm_v3_state';
+const LEGACY_V2_KEY = 'alreefi_farm_v2_state';
+
+/**
+ * Ensures any persisted V2 or partial state seamlessly receives new V3 fields/collections
+ * without discarding user logs, tasks, or accounts.
+ */
+export function hydrateV3State(parsed) {
+  const fresh = createInitialFarmState();
+  if (!parsed || !Array.isArray(parsed.houses) || !Array.isArray(parsed.userAccounts)) {
+    return fresh;
+  }
+
+  const hydratedHouses = parsed.houses.map((h) => {
+    const templateHouse = fresh.houses.find((fh) => fh.id === h.id);
+    return {
+      ...(templateHouse || {}),
+      ...h,
+      siloSightGlassTons:
+        h.siloSightGlassTons !== undefined
+          ? h.siloSightGlassTons
+          : h.feedSystemType === 'silo'
+          ? Number(((h.siloCurrentKg ?? 15000) / 1000).toFixed(2))
+          : null,
+      siloBottomQuarterAlertTons: h.siloBottomQuarterAlertTons ?? 5.0,
+      siloConsumptionHistory: Array.isArray(h.siloConsumptionHistory)
+        ? h.siloConsumptionHistory
+        : templateHouse?.siloConsumptionHistory || [],
+      previousCycleTeamIds: Array.isArray(h.previousCycleTeamIds)
+        ? h.previousCycleTeamIds
+        : templateHouse?.previousCycleTeamIds || [],
+    };
+  });
+
+  return {
+    ...fresh,
+    ...parsed,
+    version: 3,
+    houses: hydratedHouses,
+    taskCategories:
+      Array.isArray(parsed.taskCategories) && parsed.taskCategories.length > 0
+        ? parsed.taskCategories
+        : fresh.taskCategories,
+    recurringTaskRules:
+      Array.isArray(parsed.recurringTaskRules) && parsed.recurringTaskRules.length > 0
+        ? parsed.recurringTaskRules
+        : fresh.recurringTaskRules,
+    recurringCompletions: parsed.recurringCompletions || {},
+    ordersAndBills:
+      Array.isArray(parsed.ordersAndBills) && parsed.ordersAndBills.length > 0
+        ? parsed.ordersAndBills
+        : fresh.ordersAndBills,
+    harvestLaborRecords:
+      Array.isArray(parsed.harvestLaborRecords) && parsed.harvestLaborRecords.length > 0
+        ? parsed.harvestLaborRecords
+        : fresh.harvestLaborRecords,
+  };
+}
 
 /**
  * LocalStorageAdapter — Active default persistence engine.
@@ -15,19 +72,22 @@ export class LocalStorageAdapter {
 
   async fetchFarmState() {
     try {
-      const raw = window.localStorage.getItem(this.storageKey);
-      if (!raw) {
-        const seeded = createInitialFarmState();
-        await this.saveFarmState(seeded);
-        return seeded;
+      const rawV3 = window.localStorage.getItem(this.storageKey);
+      if (rawV3) {
+        const parsed = JSON.parse(rawV3);
+        return hydrateV3State(parsed);
       }
-      const parsed = JSON.parse(raw);
-      if (!parsed || !Array.isArray(parsed.houses) || !Array.isArray(parsed.userAccounts)) {
-        const seeded = createInitialFarmState();
-        await this.saveFarmState(seeded);
-        return seeded;
+
+      const rawV2 = window.localStorage.getItem(LEGACY_V2_KEY);
+      if (rawV2) {
+        const migrated = hydrateV3State(JSON.parse(rawV2));
+        await this.saveFarmState(migrated);
+        return migrated;
       }
-      return parsed;
+
+      const seeded = createInitialFarmState();
+      await this.saveFarmState(seeded);
+      return seeded;
     } catch (error) {
       console.error('[LocalStorageAdapter] Failed to read state, reseeding:', error);
       const seeded = createInitialFarmState();
@@ -384,6 +444,41 @@ export function compressImageFile(file, maxWidth = 640, quality = 0.72) {
     reader.onerror = () => reject(new Error('Failed to read image file.'));
     reader.readAsDataURL(file);
   });
+}
+
+/**
+ * Reads an order/invoice attachment (either Image or PDF) into `{ name, mimeType, sizeBytes, dataUrl }`.
+ * Images are compressed for safe LocalStorage persistence; PDFs up to 2.5MB are stored as DataURL.
+ */
+export async function readAttachmentFile(file, maxPdfMb = 2.5) {
+  if (!file) throw new Error('No file selected.');
+  if (file.type.startsWith('image/')) {
+    const dataUrl = await compressImageFile(file, 900, 0.78);
+    return {
+      name: file.name,
+      mimeType: 'image/jpeg',
+      sizeBytes: dataUrl.length,
+      dataUrl,
+    };
+  }
+  if (file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')) {
+    if (file.size > maxPdfMb * 1024 * 1024) {
+      throw new Error(`PDF exceeds ${maxPdfMb} MB browser storage limit.`);
+    }
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = (ev) =>
+        resolve({
+          name: file.name,
+          mimeType: 'application/pdf',
+          sizeBytes: file.size,
+          dataUrl: String(ev.target?.result || ''),
+        });
+      reader.onerror = () => reject(new Error('Failed to read PDF file.'));
+      reader.readAsDataURL(file);
+    });
+  }
+  throw new Error('Please upload an Image (JPG/PNG) or PDF invoice/bill.');
 }
 
 export default storageService;

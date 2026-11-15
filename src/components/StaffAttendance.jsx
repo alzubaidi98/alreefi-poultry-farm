@@ -101,6 +101,7 @@ export default function StaffAttendance() {
     saveUserAccount,
     deleteUserAccount,
     updateShiftConfig,
+    clonePreviousHouseTeam,
     notify,
   } = useFarm();
 
@@ -519,6 +520,40 @@ export default function StaffAttendance() {
                 .map((s) => `${s.label.split(' ')[0]} ${s.startTime}-${s.endTime}`)
                 .join(' • ')}
             </p>
+          </div>
+        </div>
+
+        {/* V3 Cycle Team Clone Strip & Scope Clarification (Leave/Payroll deferred to Phase 2) */}
+        <div className="mt-4 flex flex-col justify-between gap-2.5 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-3 text-xs sm:flex-row sm:items-center dark:border-slate-700 dark:bg-slate-900/60">
+          <p className="font-semibold text-slate-600 dark:text-slate-300">
+            Focused V3 Scope: Attendance Clock-In/Out &amp; Multi-House Access Matrix.{' '}
+            <span className="text-slate-500 dark:text-slate-400">
+              (Annual Leave &amp; Payroll deferred to Phase 2; Harvest Bonuses are in Weights &amp; Reports.)
+            </span>
+          </p>
+          <div className="flex flex-wrap items-center gap-1.5">
+            {allHouses
+              .filter((h) => {
+                const prevCount = (h.previousCycleTeamIds || []).length;
+                if (prevCount === 0) return false;
+                const activeAssigned = userAccounts.some(
+                  (u) =>
+                    (u.role === 'worker' || u.role === 'supervisor') &&
+                    Array.isArray(u.assignedHouseIds) &&
+                    u.assignedHouseIds.includes(h.id)
+                );
+                return !activeAssigned;
+              })
+              .map((h) => (
+                <button
+                  key={h.id}
+                  type="button"
+                  onClick={() => clonePreviousHouseTeam(h.id)}
+                  className="rounded-full bg-emerald-800 px-3 py-1 text-[11px] font-extrabold text-white hover:bg-emerald-900"
+                >
+                  Clone Previous Team → {h.name} ({(h.previousCycleTeamIds || []).length})
+                </button>
+              ))}
           </div>
         </div>
 

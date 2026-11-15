@@ -18,6 +18,7 @@ import {
   Thermometer,
   UserCheck,
 } from 'lucide-react';
+import { Edit3, Repeat } from 'lucide-react';
 import { TASK_CATEGORY_PREFIXES } from '../mockData.js';
 import { compressImageFile } from '../services/storageService.js';
 import { useFarm } from '../App.jsx';
@@ -63,6 +64,10 @@ export default function TaskVerification() {
     activeWorker,
     visibleHouses,
     addTaskTemplate,
+    addTaskCategory,
+    updateTaskCategory,
+    createRecurringTaskRule,
+    toggleRecurringRuleActive,
     createTask,
     bulkAssignTemplate,
     submitTaskForVerification,
@@ -77,12 +82,51 @@ export default function TaskVerification() {
   const [showTemplatePanel, setShowTemplatePanel] = useState(false);
   const [showFreeTaskPanel, setShowFreeTaskPanel] = useState(false);
 
+  const taskCategories = useMemo(
+    () =>
+      state.taskCategories && state.taskCategories.length
+        ? state.taskCategories
+        : TASK_CATEGORY_PREFIXES,
+    [state.taskCategories]
+  );
+
   // Filters
   const [prefixFilter, setPrefixFilter] = useState('All');
   const [statusFilter, setStatusFilter] = useState('All');
   const [houseFilter, setHouseFilter] = useState('All');
+  const [shiftFilter, setShiftFilter] = useState('All');
   const [searchQuery, setSearchQuery] = useState('');
   const [highlightedJob, setHighlightedJob] = useState(null);
+
+  // Dynamic Category Manager & Repeat Interval Engine State
+  const [showCategoryManager, setShowCategoryManager] = useState(false);
+  const [newCategoryDraft, setNewCategoryDraft] = useState({
+    prefix: 'X',
+    category: '',
+    color: 'emerald',
+  });
+  const [editingCatKey, setEditingCatKey] = useState(null);
+  const [editingCatDraft, setEditingCatDraft] = useState({
+    prefix: '',
+    category: '',
+    color: 'emerald',
+  });
+
+  const [showRecurrencePanel, setShowRecurrencePanel] = useState(false);
+  const [bulkRecurrenceType, setBulkRecurrenceType] = useState('once');
+  const [bulkRecurrenceDays, setBulkRecurrenceDays] = useState(2);
+  const [bulkHouseScope, setBulkHouseScope] = useState('specific'); // 'all' | 'specific'
+  const [bulkShiftScope, setBulkShiftScope] = useState('all'); // 'all' | 'shift-day' | 'shift-night'
+  const [newRuleForm, setNewRuleForm] = useState({
+    title: '',
+    category: 'Biosecurity',
+    houseScope: 'all',
+    targetHouseIds: ['house-1'],
+    shiftScope: 'all',
+    recurrenceType: 'daily',
+    recurrenceIntervalDays: 1,
+    note: '',
+  });
 
   // Active houses available for assignment
   const activeHouses = useMemo(
@@ -211,13 +255,17 @@ export default function TaskVerification() {
         task.categoryPrefix ||
         task.prefix ||
         task.taskCode?.split('-')?.[0] ||
-        TASK_CATEGORY_PREFIXES.find((c) => c.category === task.category)?.prefix ||
+        taskCategories.find((c) => c.category === task.category)?.prefix ||
         ''
       ).toUpperCase();
 
       if (prefixFilter !== 'All' && taskPrefix !== prefixFilter) return false;
       if (statusFilter !== 'All' && task.status !== statusFilter) return false;
       if (houseFilter !== 'All' && task.houseId !== houseFilter) return false;
+      if (shiftFilter !== 'All') {
+        const sLbl = String(task.shiftLabel || '').toLowerCase();
+        if (!sLbl.includes(shiftFilter.toLowerCase())) return false;
+      }
 
       if (searchQuery.trim()) {
         const q = searchQuery.trim().toLowerCase();
@@ -238,7 +286,7 @@ export default function TaskVerification() {
 
       return true;
     });
-  }, [state.tasks, userRole, currentUser, prefixFilter, statusFilter, houseFilter, searchQuery]);
+  }, [state.tasks, userRole, currentUser, prefixFilter, statusFilter, houseFilter, shiftFilter, searchQuery]);
 
   const statusCounts = useMemo(() => {
     const all = state.tasks || [];
@@ -269,8 +317,8 @@ export default function TaskVerification() {
     e.preventDefault();
     if (!newTplDraft.title.trim()) return;
     const prefixMeta =
-      TASK_CATEGORY_PREFIXES.find((p) => p.prefix === newTplDraft.prefix) ||
-      TASK_CATEGORY_PREFIXES[0];
+      taskCategories.find((p) => p.prefix === newTplDraft.prefix) ||
+      taskCategories[0];
     const created = addTaskTemplate({
       prefix: prefixMeta.prefix,
       category: prefixMeta.category,
@@ -317,8 +365,8 @@ export default function TaskVerification() {
     if (!freeTask.title.trim()) return;
 
     const prefixMeta =
-      TASK_CATEGORY_PREFIXES.find((p) => p.prefix === freeTask.categoryPrefix) ||
-      TASK_CATEGORY_PREFIXES[0];
+      taskCategories.find((p) => p.prefix === freeTask.categoryPrefix) ||
+      taskCategories[0];
     const cleanNum = freeTask.customTaskNumber.trim()
       ? String(freeTask.customTaskNumber.trim()).padStart(3, '0')
       : suggestedTaskNum;
@@ -481,6 +529,419 @@ export default function TaskVerification() {
         </div>
       </div>
 
+      {/* V3 Management Toolbar: Dynamic Category Manager & Repeat Interval Engine */}
+      {isManagement && (
+        <div className="space-y-3">
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-3xl border border-emerald-200/80 bg-emerald-50/70 px-5 py-3 shadow-xs dark:border-emerald-900/50 dark:bg-emerald-950/25">
+            <div className="flex items-center gap-2 text-xs font-extrabold text-emerald-950 dark:text-emerald-200">
+              <Repeat className="h-4 w-4 text-emerald-700 dark:text-emerald-400" />
+              <span>
+                V3 Task Automation: Dynamic Categories ({taskCategories.length}) • Active Recurring Rules ({(state.recurringTaskRules || []).filter((r) => r.active !== false).length})
+              </span>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setShowCategoryManager((v) => !v)}
+                className={`inline-flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-xs font-extrabold transition ${
+                  showCategoryManager
+                    ? 'bg-slate-900 text-white'
+                    : 'border border-emerald-300 bg-white text-emerald-900 hover:bg-emerald-100 dark:border-emerald-800 dark:bg-slate-900 dark:text-emerald-300'
+                }`}
+              >
+                <Edit3 className="h-3.5 w-3.5" />
+                Categories (Add / Edit)
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowRecurrencePanel((v) => !v)}
+                className={`inline-flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-xs font-extrabold transition ${
+                  showRecurrencePanel
+                    ? 'bg-emerald-800 text-white'
+                    : 'border border-indigo-300 bg-indigo-50 text-indigo-900 hover:bg-indigo-100 dark:border-indigo-800 dark:bg-indigo-950/40 dark:text-indigo-200'
+                }`}
+              >
+                <Repeat className="h-3.5 w-3.5" />
+                Repeat Interval Rules ({(state.recurringTaskRules || []).length})
+              </button>
+            </div>
+          </div>
+
+          {/* Dynamic Task Category Manager Panel */}
+          {showCategoryManager && (
+            <div className="rounded-3xl border border-slate-200 bg-white/95 p-5 shadow-sm dark:border-slate-700 dark:bg-slate-800/95">
+              <h3 className="mb-3 text-sm font-black text-slate-900 dark:text-white">
+                Dynamic Task Category Manager
+              </h3>
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  if (!newCategoryDraft.category.trim()) return;
+                  addTaskCategory(newCategoryDraft);
+                  setNewCategoryDraft({ prefix: 'X', category: '', color: 'emerald' });
+                }}
+                className="mb-4 flex flex-wrap items-end gap-2.5 border-b border-slate-100 pb-4 dark:border-slate-700"
+              >
+                <div>
+                  <label className="mb-1 block text-[10px] font-extrabold text-slate-500 uppercase">
+                    Code Prefix
+                  </label>
+                  <input
+                    type="text"
+                    maxLength={2}
+                    required
+                    value={newCategoryDraft.prefix}
+                    onChange={(e) =>
+                      setNewCategoryDraft((p) => ({ ...p, prefix: e.target.value.toUpperCase() }))
+                    }
+                    className="w-20 rounded-xl border border-slate-300 px-3 py-2 text-xs font-black uppercase dark:border-slate-600 dark:bg-slate-900"
+                  />
+                </div>
+                <div className="min-w-[180px] flex-1">
+                  <label className="mb-1 block text-[10px] font-extrabold text-slate-500 uppercase">
+                    New Category Name
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={newCategoryDraft.category}
+                    onChange={(e) =>
+                      setNewCategoryDraft((p) => ({ ...p, category: e.target.value }))
+                    }
+                    placeholder="e.g. Generator Maintenance, Litter Care..."
+                    className="w-full rounded-xl border border-slate-300 px-3 py-2 text-xs font-bold dark:border-slate-600 dark:bg-slate-900"
+                  />
+                </div>
+                <button
+                  type="submit"
+                  className="rounded-xl bg-emerald-800 px-4 py-2 text-xs font-extrabold text-white hover:bg-emerald-900"
+                >
+                  + Add Category
+                </button>
+              </form>
+
+              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                {taskCategories.map((cat) => {
+                  const key = cat.id || cat.category;
+                  const isEditing = editingCatKey === key;
+                  return (
+                    <div
+                      key={key}
+                      className="flex items-center justify-between gap-2 rounded-2xl border border-slate-200 bg-slate-50 p-2.5 dark:border-slate-700 dark:bg-slate-900"
+                    >
+                      {isEditing ? (
+                        <div className="flex flex-1 items-center gap-1.5">
+                          <input
+                            type="text"
+                            maxLength={2}
+                            value={editingCatDraft.prefix}
+                            onChange={(e) =>
+                              setEditingCatDraft((p) => ({
+                                ...p,
+                                prefix: e.target.value.toUpperCase(),
+                              }))
+                            }
+                            className="w-11 rounded-lg border border-slate-300 px-1.5 py-1 text-xs font-black uppercase dark:bg-slate-800"
+                          />
+                          <input
+                            type="text"
+                            value={editingCatDraft.category}
+                            onChange={(e) =>
+                              setEditingCatDraft((p) => ({ ...p, category: e.target.value }))
+                            }
+                            className="min-w-0 flex-1 rounded-lg border border-slate-300 px-2 py-1 text-xs font-bold dark:bg-slate-800"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => {
+                              updateTaskCategory({
+                                id: cat.id,
+                                originalCategory: cat.category,
+                                prefix: editingCatDraft.prefix,
+                                category: editingCatDraft.category,
+                                color: cat.color,
+                              });
+                              setEditingCatKey(null);
+                            }}
+                            className="rounded-lg bg-emerald-700 px-2.5 py-1 text-[10px] font-black text-white"
+                          >
+                            Save
+                          </button>
+                        </div>
+                      ) : (
+                        <>
+                          <div className="flex items-center gap-2">
+                            <span className="rounded-lg bg-slate-900 px-2 py-0.5 text-[11px] font-black text-white">
+                              {cat.prefix}
+                            </span>
+                            <span className="text-xs font-extrabold text-slate-800 dark:text-slate-200">
+                              {cat.category}
+                            </span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setEditingCatKey(key);
+                              setEditingCatDraft({
+                                prefix: cat.prefix,
+                                category: cat.category,
+                                color: cat.color || 'emerald',
+                              });
+                            }}
+                            className="rounded-lg border border-slate-300 bg-white px-2.5 py-1 text-[10px] font-extrabold text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300"
+                          >
+                            Edit
+                          </button>
+                        </>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Repeat Interval Engine Console */}
+          {showRecurrencePanel && (
+            <div className="rounded-3xl border-2 border-indigo-200 bg-white/95 p-5 shadow-sm dark:border-indigo-900/60 dark:bg-slate-800/95">
+              <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                <div>
+                  <h3 className="text-sm font-black text-slate-900 dark:text-white">
+                    Active-Cycle Repeat Interval Engine
+                  </h3>
+                  <p className="text-xs text-slate-500 dark:text-slate-400">
+                    Schedule recurring jobs across active houses &amp; shifts for the full cycle without manual start/end dates. Workers only see clean numbered Task cards.
+                  </p>
+                </div>
+              </div>
+
+              <form
+                onSubmit={(e) => {
+                  e.preventDefault();
+                  if (!newRuleForm.title.trim()) return;
+                  const catObj =
+                    taskCategories.find((c) => c.category === newRuleForm.category) ||
+                    taskCategories[0];
+                  const interval =
+                    newRuleForm.recurrenceType === 'daily'
+                      ? 1
+                      : newRuleForm.recurrenceType === 'every_2_days'
+                      ? 2
+                      : newRuleForm.recurrenceType === 'weekly'
+                      ? 7
+                      : Math.max(1, Number(newRuleForm.recurrenceIntervalDays || 2));
+                  createRecurringTaskRule({
+                    title: newRuleForm.title.trim(),
+                    category: catObj?.category || newRuleForm.category,
+                    prefix: catObj?.prefix || 'O',
+                    houseScope: newRuleForm.houseScope,
+                    targetHouseIds:
+                      newRuleForm.houseScope === 'all'
+                        ? activeHouses.map((h) => h.id)
+                        : newRuleForm.targetHouseIds,
+                    shiftScope: newRuleForm.shiftScope,
+                    recurrenceType: newRuleForm.recurrenceType,
+                    recurrenceIntervalDays: interval,
+                    note: newRuleForm.note.trim(),
+                  });
+                  setNewRuleForm((p) => ({ ...p, title: '', note: '' }));
+                }}
+                className="mb-4 grid grid-cols-1 gap-3 rounded-2xl border border-indigo-100 bg-indigo-50/50 p-4 sm:grid-cols-2 lg:grid-cols-4 dark:border-indigo-900/40 dark:bg-indigo-950/20"
+              >
+                <div className="sm:col-span-2">
+                  <label className="mb-1 block text-[10px] font-extrabold text-slate-600 uppercase">
+                    Task Name (Plain Language for Workers)
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={newRuleForm.title}
+                    onChange={(e) => setNewRuleForm((p) => ({ ...p, title: e.target.value }))}
+                    placeholder="e.g. Check Cooling Pad Sump Water & Screen"
+                    className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-bold dark:border-slate-600 dark:bg-slate-900"
+                  />
+                </div>
+                <div>
+                  <label className="mb-1 block text-[10px] font-extrabold text-slate-600 uppercase">
+                    Category
+                  </label>
+                  <select
+                    value={newRuleForm.category}
+                    onChange={(e) => setNewRuleForm((p) => ({ ...p, category: e.target.value }))}
+                    className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-bold dark:border-slate-600 dark:bg-slate-900"
+                  >
+                    {taskCategories.map((c) => (
+                      <option key={c.id || c.category} value={c.category}>
+                        {c.prefix} · {c.category}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="mb-1 block text-[10px] font-extrabold text-slate-600 uppercase">
+                    Repeat Cadence (Active Cycle)
+                  </label>
+                  <div className="flex gap-1.5">
+                    <select
+                      value={newRuleForm.recurrenceType}
+                      onChange={(e) =>
+                        setNewRuleForm((p) => ({ ...p, recurrenceType: e.target.value }))
+                      }
+                      className="flex-1 rounded-xl border border-slate-300 bg-white px-2.5 py-2 text-xs font-bold dark:border-slate-600 dark:bg-slate-900"
+                    >
+                      <option value="daily">Daily</option>
+                      <option value="every_2_days">Every 2nd Day</option>
+                      <option value="weekly">Weekly (7 Days)</option>
+                      <option value="custom_days">Every N Days</option>
+                    </select>
+                    {newRuleForm.recurrenceType === 'custom_days' && (
+                      <input
+                        type="number"
+                        min="1"
+                        max="35"
+                        value={newRuleForm.recurrenceIntervalDays}
+                        onChange={(e) =>
+                          setNewRuleForm((p) => ({
+                            ...p,
+                            recurrenceIntervalDays: Number(e.target.value || 1),
+                          }))
+                        }
+                        className="w-16 rounded-xl border border-slate-300 bg-white px-2 py-2 text-xs font-black dark:border-slate-600 dark:bg-slate-900"
+                      />
+                    )}
+                  </div>
+                </div>
+
+                <div>
+                  <label className="mb-1 block text-[10px] font-extrabold text-slate-600 uppercase">
+                    Houses Scope
+                  </label>
+                  <select
+                    value={newRuleForm.houseScope}
+                    onChange={(e) => setNewRuleForm((p) => ({ ...p, houseScope: e.target.value }))}
+                    className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-bold dark:border-slate-600 dark:bg-slate-900"
+                  >
+                    <option value="all">All Active Houses</option>
+                    <option value="specific">Specific Houses Only</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="mb-1 block text-[10px] font-extrabold text-slate-600 uppercase">
+                    Shift Scope
+                  </label>
+                  <select
+                    value={newRuleForm.shiftScope}
+                    onChange={(e) => setNewRuleForm((p) => ({ ...p, shiftScope: e.target.value }))}
+                    className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-bold dark:border-slate-600 dark:bg-slate-900"
+                  >
+                    <option value="all">All Shifts (Day &amp; Night)</option>
+                    <option value="shift-day">Day Shift Only</option>
+                    <option value="shift-night">Night Shift Only</option>
+                  </select>
+                </div>
+
+                <div className="sm:col-span-2">
+                  <label className="mb-1 block text-[10px] font-extrabold text-slate-600 uppercase">
+                    Worker Instructions
+                  </label>
+                  <input
+                    type="text"
+                    value={newRuleForm.note}
+                    onChange={(e) => setNewRuleForm((p) => ({ ...p, note: e.target.value }))}
+                    placeholder="Instructions displayed cleanly inside Task card..."
+                    className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs dark:border-slate-600 dark:bg-slate-900"
+                  />
+                </div>
+
+                {newRuleForm.houseScope === 'specific' && (
+                  <div className="flex flex-wrap gap-1.5 sm:col-span-4">
+                    {activeHouses.map((h) => {
+                      const picked = newRuleForm.targetHouseIds.includes(h.id);
+                      return (
+                        <button
+                          key={h.id}
+                          type="button"
+                          onClick={() =>
+                            setNewRuleForm((p) => ({
+                              ...p,
+                              targetHouseIds: picked
+                                ? p.targetHouseIds.filter((id) => id !== h.id)
+                                : [...p.targetHouseIds, h.id],
+                            }))
+                          }
+                          className={`rounded-full px-3 py-1 text-xs font-bold ${
+                            picked
+                              ? 'bg-indigo-700 text-white'
+                              : 'border border-slate-300 bg-white text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300'
+                          }`}
+                        >
+                          {h.name}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+
+                <div className="flex justify-end sm:col-span-4">
+                  <button
+                    type="submit"
+                    className="rounded-xl bg-indigo-700 px-5 py-2 text-xs font-extrabold text-white hover:bg-indigo-800"
+                  >
+                    + Activate Recurring Cycle Task
+                  </button>
+                </div>
+              </form>
+
+              <div className="space-y-2">
+                {(state.recurringTaskRules || []).map((rule) => (
+                  <div
+                    key={rule.id}
+                    className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-slate-200 bg-slate-50 px-3.5 py-2.5 text-xs dark:border-slate-700 dark:bg-slate-900"
+                  >
+                    <div>
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="rounded-md bg-slate-900 px-2 py-0.5 text-[10px] font-black text-white">
+                          {rule.taskCode || rule.prefix}
+                        </span>
+                        <span className="font-black text-slate-900 dark:text-white">
+                          {rule.title}
+                        </span>
+                        <span className="rounded-full bg-indigo-100 px-2 py-0.5 text-[10px] font-extrabold text-indigo-800 dark:bg-indigo-950/60 dark:text-indigo-200">
+                          Every {rule.recurrenceIntervalDays || 1} day(s) • Active Cycle
+                        </span>
+                        <span className="rounded-full bg-slate-200 px-2 py-0.5 text-[10px] font-bold text-slate-700 dark:bg-slate-800 dark:text-slate-300">
+                          {rule.houseScope === 'all'
+                            ? 'All Houses'
+                            : `${(rule.targetHouseIds || []).length} House(s)`}{' '}
+                          •{' '}
+                          {rule.shiftScope === 'all'
+                            ? 'All Shifts'
+                            : rule.shiftScope === 'shift-day'
+                            ? 'Day Shift'
+                            : 'Night Shift'}
+                        </span>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => toggleRecurringRuleActive(rule.id)}
+                      className={`rounded-full px-3 py-1 text-[11px] font-extrabold ${
+                        rule.active !== false
+                          ? 'bg-emerald-700 text-white'
+                          : 'bg-slate-300 text-slate-700'
+                      }`}
+                    >
+                      {rule.active !== false ? 'Active' : 'Paused'}
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* PANEL 1: Predefined Template Library & Bulk Assign (Management Only) */}
       {isManagement && showTemplatePanel && (
         <section className="space-y-5 rounded-3xl border-2 border-emerald-200 bg-white/95 p-5 shadow-md">
@@ -506,9 +967,9 @@ export default function TaskVerification() {
               >
                 All ({templates.length})
               </button>
-              {TASK_CATEGORY_PREFIXES.map((cat) => (
+              {taskCategories.map((cat) => (
                 <button
-                  key={cat.prefix}
+                  key={cat.id || cat.prefix}
                   type="button"
                   onClick={() => setTemplatePrefixFilter(cat.prefix)}
                   className={`rounded-full px-2.5 py-1 text-[11px] font-extrabold ${
@@ -550,8 +1011,8 @@ export default function TaskVerification() {
                     onChange={(e) => setNewTplDraft((p) => ({ ...p, prefix: e.target.value }))}
                     className="rounded-xl border border-slate-300 bg-white px-2.5 py-1.5 text-xs font-bold"
                   >
-                    {TASK_CATEGORY_PREFIXES.map((c) => (
-                      <option key={c.prefix} value={c.prefix}>
+                    {taskCategories.map((c) => (
+                      <option key={c.id || c.prefix} value={c.prefix}>
                         {c.prefix} · {c.category}
                       </option>
                     ))}
@@ -643,7 +1104,39 @@ export default function TaskVerification() {
 
             {/* Bulk Assign Controls */}
             <form
-              onSubmit={handleBulkAssign}
+              onSubmit={(e) => {
+                if (
+                  bulkRecurrenceType !== 'once' &&
+                  selectedTemplate &&
+                  !(selectedTemplate.defaultScope === 'role' && bulkShiftLabel === 'Role Task')
+                ) {
+                  e.preventDefault();
+                  const interval =
+                    bulkRecurrenceType === 'daily'
+                      ? 1
+                      : bulkRecurrenceType === 'every_2_days'
+                      ? 2
+                      : bulkRecurrenceType === 'weekly'
+                      ? 7
+                      : Math.max(1, Number(bulkRecurrenceDays || 2));
+                  createRecurringTaskRule({
+                    templateId: selectedTemplate.id,
+                    title: selectedTemplate.title,
+                    category: selectedTemplate.category || 'Operations',
+                    prefix: selectedTemplate.prefix || selectedTemplate.categoryPrefix || 'O',
+                    houseScope: bulkHouseScope,
+                    targetHouseIds:
+                      bulkHouseScope === 'all' ? activeHouses.map((h) => h.id) : bulkHouseIds,
+                    shiftScope: bulkShiftScope,
+                    recurrenceType: bulkRecurrenceType,
+                    recurrenceIntervalDays: interval,
+                    note: selectedTemplate.defaultInstructions || '',
+                  });
+                  setShowRecurrencePanel(true);
+                  return;
+                }
+                handleBulkAssign(e);
+              }}
               className="space-y-4 rounded-2xl border border-slate-200 bg-slate-50 p-4 lg:col-span-5"
             >
               <p className="text-xs font-extrabold tracking-wide text-slate-700 uppercase">
@@ -742,17 +1235,62 @@ export default function TaskVerification() {
                 <div>
                   <label className="mb-1 block text-xs font-bold text-slate-700">Shift / Scope</label>
                   <select
-                    value={bulkShiftLabel}
-                    onChange={(e) => setBulkShiftLabel(e.target.value)}
+                    value={bulkRecurrenceType === 'once' ? bulkShiftLabel : bulkShiftScope}
+                    onChange={(e) => {
+                      if (bulkRecurrenceType === 'once') {
+                        setBulkShiftLabel(e.target.value);
+                      } else {
+                        setBulkShiftScope(e.target.value);
+                      }
+                    }}
                     className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-bold text-slate-900"
                   >
-                    {availableShifts.map((sh) => (
-                      <option key={sh} value={sh}>
-                        {sh}
-                      </option>
-                    ))}
+                    {bulkRecurrenceType === 'once' ? (
+                      availableShifts.map((sh) => (
+                        <option key={sh} value={sh}>
+                          {sh}
+                        </option>
+                      ))
+                    ) : (
+                      <>
+                        <option value="all">All Shifts (Day &amp; Night)</option>
+                        <option value="shift-day">Day Shift</option>
+                        <option value="shift-night">Night Shift</option>
+                      </>
+                    )}
                   </select>
                 </div>
+                <div>
+                  <label className="mb-1 block text-xs font-bold text-slate-700">
+                    Repeat Interval (Active Cycle)
+                  </label>
+                  <div className="flex gap-1.5">
+                    <select
+                      value={bulkRecurrenceType}
+                      onChange={(e) => setBulkRecurrenceType(e.target.value)}
+                      className="flex-1 rounded-xl border border-slate-300 bg-white px-2.5 py-2 text-xs font-bold text-slate-900"
+                    >
+                      <option value="once">Once (One-Time Job)</option>
+                      <option value="daily">Daily (Every Day)</option>
+                      <option value="every_2_days">Every 2nd Day</option>
+                      <option value="weekly">Weekly (Every 7 Days)</option>
+                      <option value="custom_days">Every N Days</option>
+                    </select>
+                    {bulkRecurrenceType === 'custom_days' && (
+                      <input
+                        type="number"
+                        min="1"
+                        max="35"
+                        value={bulkRecurrenceDays}
+                        onChange={(e) => setBulkRecurrenceDays(Number(e.target.value || 1))}
+                        className="w-14 rounded-xl border border-slate-300 bg-white px-2 py-2 text-xs font-black text-slate-900"
+                      />
+                    )}
+                  </div>
+                </div>
+              </div>
+
+              {bulkRecurrenceType === 'once' ? (
                 <div>
                   <label className="mb-1 block text-xs font-bold text-slate-700">Due Date</label>
                   <input
@@ -762,7 +1300,25 @@ export default function TaskVerification() {
                     className="w-full rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-bold text-slate-900"
                   />
                 </div>
-              </div>
+              ) : (
+                <div className="flex items-center justify-between gap-2 rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-2 text-[11px] font-semibold text-indigo-900">
+                  <span>
+                    Target Scope:{' '}
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setBulkHouseScope((s) => (s === 'all' ? 'specific' : 'all'))
+                      }
+                      className="ml-1 underline font-black"
+                    >
+                      {bulkHouseScope === 'all'
+                        ? 'All Active Houses'
+                        : `${bulkHouseIds.length} Specific House(s)`}
+                    </button>
+                  </span>
+                  <span>Runs across active cycle (No manual end date)</span>
+                </div>
+              )}
 
               <div className="flex items-center justify-end gap-2 pt-1">
                 <button
@@ -777,11 +1333,13 @@ export default function TaskVerification() {
                   className="inline-flex items-center gap-2 rounded-full bg-emerald-800 px-5 py-2.5 text-xs font-extrabold text-white shadow-sm hover:bg-emerald-900"
                 >
                   <Send className="h-3.5 w-3.5" />
-                  Bulk Assign Jobs (
-                  {selectedTemplate?.defaultScope === 'role' && bulkShiftLabel === 'Role Task'
-                    ? 1
-                    : bulkHouseIds.length}
-                  )
+                  {bulkRecurrenceType === 'once'
+                    ? `Bulk Assign Jobs (${
+                        selectedTemplate?.defaultScope === 'role' && bulkShiftLabel === 'Role Task'
+                          ? 1
+                          : bulkHouseIds.length
+                      })`
+                    : 'Activate Recurring Cycle Rule'}
                 </button>
               </div>
             </form>
@@ -818,8 +1376,8 @@ export default function TaskVerification() {
                 onChange={(e) => setFreeTask((p) => ({ ...p, categoryPrefix: e.target.value }))}
                 className="w-full rounded-xl border border-slate-300 bg-slate-50 px-3 py-2 text-xs font-bold"
               >
-                {TASK_CATEGORY_PREFIXES.map((item) => (
-                  <option key={item.prefix} value={item.prefix}>
+                {taskCategories.map((item) => (
+                  <option key={item.id || item.prefix} value={item.prefix}>
                     {item.prefix} — {item.category}
                   </option>
                 ))}
@@ -1019,9 +1577,9 @@ export default function TaskVerification() {
             >
               All Categories
             </button>
-            {TASK_CATEGORY_PREFIXES.map((cat) => (
+            {taskCategories.map((cat) => (
               <button
-                key={cat.prefix}
+                key={cat.id || cat.prefix}
                 type="button"
                 onClick={() => setPrefixFilter(cat.prefix)}
                 className={`rounded-full px-3 py-1.5 text-xs font-bold transition ${
@@ -1063,23 +1621,34 @@ export default function TaskVerification() {
                 setSearchQuery(e.target.value);
                 setHighlightedJob(null);
               }}
-              placeholder="Search by Job # (e.g. 01-001-04), Task # (C-001), title, or assignee..."
+              placeholder="Search by Task Name, Job # (e.g. 01-001-04), Task # (C-001), or assignee..."
               className="w-full rounded-xl border border-slate-200 bg-slate-50 py-2 pr-3 pl-8 text-xs font-semibold text-slate-900 focus:border-emerald-700 focus:outline-none"
             />
           </div>
           {isManagement && (
-            <select
-              value={houseFilter}
-              onChange={(e) => setHouseFilter(e.target.value)}
-              className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-bold text-slate-800"
-            >
-              <option value="All">All Houses &amp; Roles</option>
-              {activeHouses.map((h) => (
-                <option key={h.id} value={h.id}>
-                  {h.name} ({h.code})
-                </option>
-              ))}
-            </select>
+            <>
+              <select
+                value={houseFilter}
+                onChange={(e) => setHouseFilter(e.target.value)}
+                className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-bold text-slate-800"
+              >
+                <option value="All">All Houses &amp; Roles</option>
+                {activeHouses.map((h) => (
+                  <option key={h.id} value={h.id}>
+                    {h.name} ({h.code})
+                  </option>
+                ))}
+              </select>
+              <select
+                value={shiftFilter}
+                onChange={(e) => setShiftFilter(e.target.value)}
+                className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-bold text-slate-800"
+              >
+                <option value="All">All Shifts</option>
+                <option value="Day">Day Shift</option>
+                <option value="Night">Night Shift</option>
+              </select>
+            </>
           )}
           {searchQuery && (
             <button
@@ -1113,7 +1682,7 @@ export default function TaskVerification() {
               task.categoryPrefix ||
               task.prefix ||
               task.taskCode?.split('-')?.[0] ||
-              TASK_CATEGORY_PREFIXES.find((c) => c.category === task.category)?.prefix ||
+              taskCategories.find((c) => c.category === task.category)?.prefix ||
               'T';
             const taskNum = String(task.taskNumber || task.taskCode?.split('-')?.[1] || '001').padStart(3, '0');
             const taskCodeBadge = task.taskCode || `${prefix}-${taskNum}`;

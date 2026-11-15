@@ -48,14 +48,160 @@ export const EMERGENCY_EVENT_TYPES = [
 ];
 
 export const TASK_CATEGORY_PREFIXES = [
-  { prefix: 'C', category: 'Cleaning' },
-  { prefix: 'W', category: 'Water' },
-  { prefix: 'F', category: 'Feed' },
-  { prefix: 'V', category: 'Ventilation' },
-  { prefix: 'B', category: 'Biosecurity' },
-  { prefix: 'M', category: 'Medication' },
-  { prefix: 'S', category: 'Supervisory' },
+  { id: 'cat-C', prefix: 'C', category: 'Cleaning', color: 'sky' },
+  { id: 'cat-W', prefix: 'W', category: 'Water', color: 'blue' },
+  { id: 'cat-F', prefix: 'F', category: 'Feed', color: 'amber' },
+  { id: 'cat-V', prefix: 'V', category: 'Ventilation', color: 'emerald' },
+  { id: 'cat-B', prefix: 'B', category: 'Biosecurity', color: 'purple' },
+  { id: 'cat-M', prefix: 'M', category: 'Medication', color: 'rose' },
+  { id: 'cat-S', prefix: 'S', category: 'Supervisory', color: 'slate' },
 ];
+
+export const ORDER_BILL_CATEGORIES = [
+  'Feed',
+  'Water',
+  'Chicks',
+  'Extra Medicines',
+  'Equipment & Other',
+];
+
+// Standard daily broiler body weight curve (Days 1-42, grams) alongside final Alain Farms target (1350-1550g)
+export const BROILER_DAILY_WEIGHT_STANDARDS_G = {
+  1: 42, 2: 56, 3: 72, 4: 91, 5: 114, 6: 145, 7: 185,
+  8: 222, 9: 262, 10: 304, 11: 348, 12: 392, 13: 434, 14: 475,
+  15: 530, 16: 588, 17: 648, 18: 712, 19: 778, 20: 846, 21: 915,
+  22: 988, 23: 1062, 24: 1138, 25: 1215, 26: 1294, 27: 1372, 28: 1450,
+  29: 1532, 30: 1615, 31: 1698, 32: 1782, 33: 1868, 34: 1954, 35: 2040,
+  36: 2130, 37: 2220, 38: 2310, 39: 2400, 40: 2490, 41: 2580, 42: 2670,
+};
+
+export function getExpectedWeightForDay(cycleDay) {
+  const day = Math.max(1, Math.min(42, Math.round(Number(cycleDay || 1))));
+  return BROILER_DAILY_WEIGHT_STANDARDS_G[day] || 1450;
+}
+
+function parseHhMmToMinutes(hhmm) {
+  const [h, m] = String(hhmm || '06:00')
+    .split(':')
+    .map((n) => Number(n || 0));
+  return (h % 24) * 60 + (m % 60);
+}
+
+/**
+ * Automatically detects the active operational shift (e.g. Day Shift vs Night Shift)
+ * based purely on current clock timestamp and configured shift timings.
+ */
+export function detectActiveShiftForTimestamp(dateOrIso = new Date(), shiftConfig = null) {
+  const dt = dateOrIso instanceof Date ? dateOrIso : new Date(dateOrIso || Date.now());
+  const validDate = Number.isNaN(dt.getTime()) ? new Date() : dt;
+  const currentMins = validDate.getHours() * 60 + validDate.getMinutes();
+
+  const operationalShifts = (shiftConfig?.shifts || []).filter((s) => s.id !== 'shift-mgmt');
+  const candidates =
+    operationalShifts.length > 0
+      ? operationalShifts
+      : [
+          { id: 'shift-day', label: 'Day Shift', startTime: '06:00', endTime: '18:00', hours: 12 },
+          { id: 'shift-night', label: 'Night Shift', startTime: '18:00', endTime: '06:00', hours: 12 },
+        ];
+
+  const matched =
+    candidates.find((s) => {
+      const start = parseHhMmToMinutes(s.startTime);
+      const end = parseHhMmToMinutes(s.endTime);
+      if (end > start) {
+        return currentMins >= start && currentMins < end;
+      }
+      // Overnight wrap (e.g. 18:00 to 06:00)
+      return currentMins >= start || currentMins < end;
+    }) || candidates[0];
+
+  const fullLabel = `${matched.label} (${matched.startTime}-${matched.endTime})`;
+  return {
+    shiftId: matched.id,
+    label: matched.label,
+    shortLabel: matched.label,
+    windowLabel: `${matched.startTime}–${matched.endTime}`,
+    fullLabel,
+  };
+}
+
+/**
+ * Resolves today's clean numbered task list for a house & auto-detected shift,
+ * merging concrete pending jobs with active-cycle recurring task rules.
+ */
+export function getTasksForHouseAndShift(state, houseId, detectedShift, role = 'worker') {
+  const house = (state.houses || []).find((h) => h.id === houseId);
+  if (!house || house.phase === 'cleaning' || house.isActive === false) return [];
+
+  const cycleDay = Math.max(1, Number(house.cycleDay || 1));
+  const shiftId = detectedShift?.shiftId || 'shift-day';
+  const shiftNameLower = String(detectedShift?.label || 'Day Shift').toLowerCase();
+
+  const matchesShift = (taskShiftLabel, shiftScope) => {
+    if (shiftScope === 'all') return true;
+    if (shiftScope && shiftScope === shiftId) return true;
+    const lbl = String(taskShiftLabel || '').toLowerCase();
+    if (!lbl || lbl === 'all shifts' || lbl === 'role task') return true;
+    return lbl.includes(shiftNameLower.split(' ')[0]);
+  };
+
+  // 1. Concrete task jobs assigned to this house (or supervisor role)
+  const concreteTasks = (state.tasks || [])
+    .filter((t) => {
+      if (t.houseId === houseId) {
+        return matchesShift(t.shiftLabel, t.shiftScope);
+      }
+      if (role === 'supervisor' && t.assignmentScope === 'role' && String(t.targetRole || '').toLowerCase() === 'supervisor') {
+        return true;
+      }
+      return false;
+    })
+    .map((t) => ({
+      ...t,
+      sourceType: 'job',
+    }));
+
+  // 2. Active-cycle recurring rules generating instances when cycleDay hits interval
+  const todayStr = new Date().toISOString().slice(0, 10);
+  const existingTitles = new Set(concreteTasks.map((t) => `${t.title.toLowerCase()}::${t.houseId || 'role'}`));
+
+  const recurringInstances = (state.recurringTaskRules || [])
+    .filter((rule) => {
+      if (rule.active === false) return false;
+      const inHouse =
+        rule.houseScope === 'all' || (Array.isArray(rule.targetHouseIds) && rule.targetHouseIds.includes(houseId));
+      if (!inHouse) return false;
+      if (!matchesShift(null, rule.shiftScope || 'all')) return false;
+
+      const interval = Math.max(1, Number(rule.recurrenceIntervalDays || 1));
+      if (rule.recurrenceType === 'daily' || interval === 1) return true;
+      return (cycleDay - 1) % interval === 0;
+    })
+    .filter((rule) => !existingTitles.has(`${rule.title.toLowerCase()}::${houseId}`))
+    .map((rule) => {
+      const completionKey = `${rule.id}:${houseId}:c${house.cycleNumber}:d${cycleDay}:${shiftId}`;
+      const doneRecord = (state.recurringCompletions || {})[completionKey] || null;
+      return {
+        id: `recinst-${completionKey}`,
+        recurringRuleId: rule.id,
+        completionKey,
+        houseId,
+        cycleDay,
+        title: rule.title,
+        category: rule.category,
+        status: doneRecord ? 'Submitted' : 'Assigned',
+        submittedAt: doneRecord?.completedAt || null,
+        completedBy: doneRecord?.completedBy || null,
+        workerNote: doneRecord?.note || rule.note || '',
+        dueDate: todayStr,
+        sourceType: 'recurring',
+        instructions: rule.note || `Scheduled recurring task (Every ${rule.recurrenceIntervalDays || 1} day(s) • Day ${cycleDay} of Cycle #${house.cycleNumber})`,
+      };
+    });
+
+  return [...concreteTasks, ...recurringInstances];
+}
 
 export function gallonsToLiters(gal) {
   return Number((Number(gal || 0) * 3.78541).toFixed(2));
@@ -103,12 +249,15 @@ export const LOCALIZATION_DICTIONARY = {
     houseOverview: 'House Overview',
     houses: 'Houses',
     dailyLog: 'Daily Log',
+    fieldWorkspace: 'Daily Workspace',
     dailyLogSilos: 'Daily Log & Silos',
     dailyLogMeds: 'Daily Log & Meds',
-    tasks: 'Tasks & Templates',
+    tasks: 'Tasks & Automation',
     assignedTasks: 'Assigned Tasks',
     analytics: 'Analytics',
-    contractsReports: 'Contracts & Reports',
+    ordersBills: 'Orders & Bills',
+    weightsReports: 'Weights & Reports',
+    contractsReports: 'Weights & Reports',
     staffAttendance: 'Staff & Attendance',
     settings: 'Settings',
     crops: 'Crops (Phase 2)',
@@ -137,12 +286,15 @@ export const LOCALIZATION_DICTIONARY = {
     houseOverview: 'نظرة عامة على العنابر',
     houses: 'العنابر',
     dailyLog: 'السجل اليومي',
+    fieldWorkspace: 'مساحة العمل اليومية',
     dailyLogSilos: 'السجل اليومي والصوامع',
     dailyLogMeds: 'السجل اليومي والأدوية',
-    tasks: 'المهام والقوالب',
+    tasks: 'المهام والتكرار',
     assignedTasks: 'المهام المسندة',
     analytics: 'التحليلات',
-    contractsReports: 'العقود والتقارير',
+    ordersBills: 'الطلبات والفواتير',
+    weightsReports: 'الأوزان والتقارير',
+    contractsReports: 'الأوزان والتقارير',
     staffAttendance: 'الموظفون والحضور',
     settings: 'الإعدادات',
     crops: 'المحاصيل (المرحلة ٢)',
@@ -171,12 +323,15 @@ export const LOCALIZATION_DICTIONARY = {
     houseOverview: 'ہاؤس اوورویو',
     houses: 'شیڈز',
     dailyLog: 'روزانہ لاگ',
+    fieldWorkspace: 'روزانہ ورک اسپیس',
     dailyLogSilos: 'روزانہ لاگ اور سائلو',
     dailyLogMeds: 'روزانہ لاگ اور ادویات',
-    tasks: 'کام اور ٹیمپلیٹس',
+    tasks: 'کام اور شیڈول',
     assignedTasks: 'تفویض کردہ کام',
     analytics: 'تجزیات',
-    contractsReports: 'معاہدے اور رپورٹس',
+    ordersBills: 'آرڈرز اور بل',
+    weightsReports: 'اوزان اور رپورٹس',
+    contractsReports: 'اوزان اور رپورٹس',
     staffAttendance: 'عملہ اور حاضری',
     settings: 'سیٹنگز',
     crops: 'فصلیں (فیز 2)',
@@ -205,12 +360,15 @@ export const LOCALIZATION_DICTIONARY = {
     houseOverview: 'House Overview',
     houses: 'Houses',
     dailyLog: 'Daily Log',
+    fieldWorkspace: 'Daily Workspace',
     dailyLogSilos: 'Daily Log & Silos',
     dailyLogMeds: 'Daily Log & Meds',
-    tasks: 'Tasks & Templates',
+    tasks: 'Tasks & Automation',
     assignedTasks: 'Assigned Tasks',
     analytics: 'Analytics',
-    contractsReports: 'Contracts & Reports',
+    ordersBills: 'Orders & Bills',
+    weightsReports: 'Weights & Reports',
+    contractsReports: 'Weights & Reports',
     staffAttendance: 'Staff & Attendance',
     settings: 'Settings',
     crops: 'Crops (Phase 2)',
@@ -406,6 +564,7 @@ function buildDailyCycleSeries(
       endTemp,
       outsideTemp,
       humidity,
+      humidityPct: humidity,
       ammoniaPpm,
       co2Ppm,
       negativePressurePa,
@@ -593,7 +752,7 @@ export function createInitialFarmState() {
   const dayBeforeStr = '2026-11-13';
 
   return {
-    version: 2,
+    version: 3,
     lastUpdated: '2026-11-15T15:30:00+04:00',
     settings: {
       farmName: 'AlReefi Poultry Farm — Al Ain Sector',
@@ -1056,6 +1215,30 @@ export function createInitialFarmState() {
         bagWeightKg: null,
         siloCapacityTons: 20,
         siloCurrentKg: 14200,
+        siloSightGlassTons: 14.2,
+        siloBottomQuarterAlertTons: 5.0,
+        siloConsumptionHistory: [
+          {
+            id: 'silo-h3-1',
+            date: '2026-11-15',
+            previousTons: 15.8,
+            remainingTons: 14.2,
+            consumedTons: 1.6,
+            method: 'Manual Sight-Glass',
+            recordedBy: 'Tariq Al-Mazrouei',
+            note: 'Sight glass steady above mid-cone mark.',
+          },
+          {
+            id: 'silo-h3-2',
+            date: '2026-11-13',
+            previousTons: 17.5,
+            remainingTons: 15.8,
+            consumedTons: 1.7,
+            method: 'Manual Sight-Glass',
+            recordedBy: 'Tariq Al-Mazrouei',
+            note: 'Finisher phase draw estimate.',
+          },
+        ],
         lastSiloRefill: {
           date: '2026-11-11',
           tonsAdded: 20,
@@ -1122,6 +1305,10 @@ export function createInitialFarmState() {
         bagWeightKg: null,
         siloCapacityTons: 20,
         siloCurrentKg: 18500,
+        siloSightGlassTons: 18.5,
+        siloBottomQuarterAlertTons: 5.0,
+        siloConsumptionHistory: [],
+        previousCycleTeamIds: ['user-w2', 'user-sup'],
         lastSiloRefill: {
           date: '2026-11-13',
           tonsAdded: 18.5,
@@ -1237,6 +1424,20 @@ export function createInitialFarmState() {
         bagWeightKg: null,
         siloCapacityTons: 20,
         siloCurrentKg: 16800,
+        siloSightGlassTons: 16.8,
+        siloBottomQuarterAlertTons: 5.0,
+        siloConsumptionHistory: [
+          {
+            id: 'silo-h5-1',
+            date: '2026-11-15',
+            previousTons: 18.2,
+            remainingTons: 16.8,
+            consumedTons: 1.4,
+            method: 'Manual Sight-Glass',
+            recordedBy: 'Tariq Al-Mazrouei',
+            note: 'Sight-glass drop logged after Grower Week 2 intake.',
+          },
+        ],
         lastSiloRefill: {
           date: '2026-11-12',
           tonsAdded: 20,
@@ -2655,6 +2856,212 @@ export function createInitialFarmState() {
         resolvedBy: 'Tariq Al-Mazrouei',
         resolvedAt: '2026-11-12T15:50:00+04:00',
         resolutionNote: 'Auger cleared and amperage verified normal.',
+      },
+    ],
+    taskCategories: TASK_CATEGORY_PREFIXES.map((c) => ({ ...c })),
+    recurringTaskRules: [
+      {
+        id: 'rec-1',
+        templateId: 'tpl-8',
+        prefix: 'B',
+        category: 'Biosecurity',
+        taskCode: 'B-001',
+        title: 'Footbath Disinfectant Check & Refill',
+        houseScope: 'all',
+        targetHouseIds: ['house-1', 'house-2', 'house-3', 'house-5'],
+        shiftScope: 'shift-day',
+        recurrenceType: 'daily',
+        recurrenceIntervalDays: 1,
+        cycleBound: true,
+        active: true,
+        note: 'Mix fresh Virkon solution in house entrance footbaths before afternoon checks.',
+        createdBy: 'Tariq Al-Mazrouei',
+        createdAt: '2026-11-01T07:00:00+04:00',
+      },
+      {
+        id: 'rec-2',
+        templateId: 'tpl-1',
+        prefix: 'C',
+        category: 'Cleaning',
+        taskCode: 'C-001',
+        title: 'Cooling Pad Sump Screen Rinse & Water Level Check',
+        houseScope: 'specific',
+        targetHouseIds: ['house-1', 'house-2', 'house-3', 'house-5'],
+        shiftScope: 'all',
+        recurrenceType: 'every_2_days',
+        recurrenceIntervalDays: 2,
+        cycleBound: true,
+        active: true,
+        note: 'Clear dust/feather buildup from pad strainer every 2nd day during cycle.',
+        createdBy: 'Tariq Al-Mazrouei',
+        createdAt: '2026-11-01T07:15:00+04:00',
+      },
+      {
+        id: 'rec-3',
+        templateId: 'tpl-3',
+        prefix: 'W',
+        category: 'Water',
+        taskCode: 'W-001',
+        title: 'Nipple Drinker Line End-Flush & Regulator Height Calibration',
+        houseScope: 'all',
+        targetHouseIds: ['house-1', 'house-2', 'house-3', 'house-5'],
+        shiftScope: 'shift-day',
+        recurrenceType: 'weekly',
+        recurrenceIntervalDays: 7,
+        cycleBound: true,
+        active: true,
+        note: 'Flush drinker lines weekly and raise winches to bird eye height.',
+        createdBy: 'Super Admin',
+        createdAt: '2026-11-01T07:30:00+04:00',
+      },
+    ],
+    recurringCompletions: {},
+    ordersAndBills: [
+      {
+        id: 'ord-101',
+        orderCode: 'ORD-2026-101',
+        title: '20T Finisher Bulk Silo Delivery (House 3)',
+        category: 'Feed',
+        quantity: 20,
+        unit: 'Tons',
+        unitPriceAed: 1700,
+        totalCostAed: 34000,
+        assignedHouseIds: ['house-3'],
+        supplierName: 'Alain Farms Feed Mill',
+        requestedBy: 'Tariq Al-Mazrouei',
+        requestedAt: '2026-11-11T09:15:00+04:00',
+        managerBillAttachment: {
+          name: 'AF-SILO-INV-3019.svg',
+          mimeType: 'image/svg+xml',
+          dataUrl: makeSvgThumb('Vendor Bill • ORD-101', '20T Finisher • AED 34,000', '#065f46', '#ecfdf5'),
+        },
+        status: 'Paid',
+        paidBy: 'Super Admin',
+        paidAt: '2026-11-11T16:40:00+04:00',
+        adminInvoiceAttachment: {
+          name: 'ADCB-WIRE-3019.svg',
+          mimeType: 'image/svg+xml',
+          dataUrl: makeSvgThumb('Paid Receipt • ADCB', 'Settled AED 34,000 • Super Admin', '#0284c7', '#f0f9ff'),
+        },
+        whatsappNotifiedAt: '2026-11-11T09:16:00+04:00',
+        notes: 'Pneumatic silo truck delivery verified at House 3 weighbridge.',
+      },
+      {
+        id: 'ord-102',
+        orderCode: 'ORD-2026-102',
+        title: 'Grower 50kg Gunny Sacks (200 Bags Split H1 & H2)',
+        category: 'Feed',
+        quantity: 200,
+        unit: 'Bags (50kg)',
+        unitPriceAed: 92,
+        totalCostAed: 18400,
+        assignedHouseIds: ['house-1', 'house-2'],
+        supplierName: 'Alain Farms Feed Mill',
+        requestedBy: 'Tariq Al-Mazrouei',
+        requestedAt: '2026-11-12T10:10:00+04:00',
+        managerBillAttachment: {
+          name: 'AF-BAGS-INV-8841.svg',
+          mimeType: 'image/svg+xml',
+          dataUrl: makeSvgThumb('Vendor Bill • ORD-102', '200x50kg Bags • AED 18,400', '#d97706', '#fffbeb'),
+        },
+        status: 'Paid',
+        paidBy: 'Super Admin',
+        paidAt: '2026-11-12T18:20:00+04:00',
+        adminInvoiceAttachment: {
+          name: 'PAID-RECEIPT-8841.svg',
+          mimeType: 'image/svg+xml',
+          dataUrl: makeSvgThumb('Paid Receipt • Transfer', 'Settled AED 18,400 • H1+H2 Split', '#065f46', '#ecfdf5'),
+        },
+        whatsappNotifiedAt: '2026-11-12T10:12:00+04:00',
+        notes: '100 bags allocated to House 1, 100 bags allocated to House 2.',
+      },
+      {
+        id: 'ord-103',
+        orderCode: 'ORD-2026-103',
+        title: 'Day-Old Ross 308 Chicks Placement — 152 Cartons (House 5)',
+        category: 'Chicks',
+        quantity: 152,
+        unit: 'Cartons (100 birds)',
+        unitPriceAed: 180,
+        totalCostAed: 27360,
+        assignedHouseIds: ['house-5'],
+        supplierName: 'Alain Hatchery',
+        requestedBy: 'Tariq Al-Mazrouei',
+        requestedAt: '2026-11-01T05:30:00+04:00',
+        managerBillAttachment: {
+          name: 'HATCHERY-DO-152.svg',
+          mimeType: 'image/svg+xml',
+          dataUrl: makeSvgThumb('Hatchery Bill • ORD-103', '15,200 Chicks • AED 27,360', '#065f46', '#ecfdf5'),
+        },
+        status: 'Paid',
+        paidBy: 'Super Admin',
+        paidAt: '2026-11-02T11:00:00+04:00',
+        adminInvoiceAttachment: {
+          name: 'RECEIPT-HATCH-152.svg',
+          mimeType: 'image/svg+xml',
+          dataUrl: makeSvgThumb('Paid Invoice • Hatchery', 'Settled AED 27,360 • House 5', '#0284c7', '#f0f9ff'),
+        },
+        whatsappNotifiedAt: '2026-11-01T05:35:00+04:00',
+        notes: 'Simultaneous Day 1 comparison placement matching House 1.',
+      },
+      {
+        id: 'ord-104',
+        orderCode: 'ORD-2026-104',
+        title: 'Extra Medicines: Electrolytes + Vit C & AD3E Stock',
+        category: 'Extra Medicines',
+        quantity: 12,
+        unit: 'Packs',
+        unitPriceAed: 240,
+        totalCostAed: 2880,
+        assignedHouseIds: ['house-2', 'house-3'],
+        supplierName: 'Al Ain Veterinary Pharmacy LLC',
+        requestedBy: 'Tariq Al-Mazrouei',
+        requestedAt: '2026-11-15T12:15:00+04:00',
+        managerBillAttachment: {
+          name: 'VET-PHARM-QUO-441.svg',
+          mimeType: 'image/svg+xml',
+          dataUrl: makeSvgThumb('Vet Bill • ORD-104', 'Heat Electrolytes • AED 2,880', '#dc2626', '#fef2f2'),
+        },
+        status: 'Pending',
+        paidBy: null,
+        paidAt: null,
+        adminInvoiceAttachment: null,
+        whatsappNotifiedAt: '2026-11-15T12:18:00+04:00',
+        notes: 'Urgent summer heat stress stock for Houses 2 & 3.',
+      },
+      {
+        id: 'ord-105',
+        orderCode: 'ORD-2026-105',
+        title: 'Desalinated Water Tanker Top-Up (4 Trips)',
+        category: 'Water',
+        quantity: 20000,
+        unit: 'Gallons',
+        unitPriceAed: 0.08,
+        totalCostAed: 1600,
+        assignedHouseIds: ['ALL'],
+        supplierName: 'Al Ain Sweet Water Logistics',
+        requestedBy: 'Tariq Al-Mazrouei',
+        requestedAt: '2026-11-15T14:00:00+04:00',
+        managerBillAttachment: null,
+        status: 'Pending',
+        paidBy: null,
+        paidAt: null,
+        adminInvoiceAttachment: null,
+        whatsappNotifiedAt: null,
+        notes: 'Farm-wide header tank reserve ahead of week 4-5 peak intake.',
+      },
+    ],
+    harvestLaborRecords: [
+      {
+        id: 'harv-1',
+        houseId: 'house-4',
+        cycleNumber: 12,
+        workerHeadcount: 8,
+        bonusPerWorkerAed: 150,
+        totalBonusAed: 1200,
+        catchDate: '2026-11-09',
+        recordedBy: 'Tariq Al-Mazrouei',
+        notes: 'Night catching crew completed House 4 load-out with zero transit DOAs.',
       },
     ],
     historicalCycles: [

@@ -198,6 +198,8 @@ export default function PoultryDashboard() {
     verifyCleaningStep,
     finishCleaningAndReadyHouse,
     recordBulkSiloDelivery,
+    recordSiloSightGlassReading,
+    clonePreviousHouseTeam,
     notify,
   } = useFarm();
 
@@ -244,6 +246,8 @@ export default function PoultryDashboard() {
     invoiceRef: '',
     note: '',
   });
+  const [sightGlassInput, setSightGlassInput] = useState('');
+  const [sightGlassNote, setSightGlassNote] = useState('');
 
   const [showOverrideModal, setShowOverrideModal] = useState(false);
   const [overrideForm, setOverrideForm] = useState({
@@ -750,6 +754,56 @@ export default function PoultryDashboard() {
         {/* Feed System (Bag-Based vs. 20T Bulk Silo) & Cooling Summary Card */}
         <div className="flex flex-col justify-between rounded-3xl border border-slate-200 bg-white/95 p-5 shadow-sm backdrop-blur-sm">
           <div className="space-y-3">
+            {/* Cycle-End Worker Reset & 1-Click Clone Previous Team (Owner & Manager) */}
+            {isManagement && (
+              <div className="rounded-2xl border border-slate-200 bg-slate-50/90 p-3 dark:border-slate-700 dark:bg-slate-900/70">
+                {(() => {
+                  const assignedStaff = (state.userAccounts || []).filter(
+                    (u) =>
+                      (u.role === 'worker' || u.role === 'supervisor') &&
+                      Array.isArray(u.assignedHouseIds) &&
+                      u.assignedHouseIds.includes(house.id)
+                  );
+                  const prevIds = house.previousCycleTeamIds || [];
+                  const prevNames = (state.userAccounts || [])
+                    .filter((u) => prevIds.includes(u.id))
+                    .map((u) => u.name);
+                  return (
+                    <div className="flex flex-col justify-between gap-2 sm:flex-row sm:items-center">
+                      <div>
+                        <div className="flex flex-wrap items-center gap-1.5">
+                          <span className="text-xs font-extrabold text-slate-900 dark:text-white">
+                            Assigned House Team ({assignedStaff.length} Active)
+                          </span>
+                          {assignedStaff.length === 0 && (
+                            <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-black text-amber-900 dark:bg-amber-950/60 dark:text-amber-300">
+                              Auto-Reset on End Cycle
+                            </span>
+                          )}
+                        </div>
+                        <p className="mt-0.5 text-[11px] font-medium text-slate-600 dark:text-slate-300">
+                          {assignedStaff.length > 0
+                            ? `Active: ${assignedStaff.map((s) => `${s.name} (${s.role})`).join(', ')}`
+                            : prevNames.length > 0
+                            ? `Previous cycle crew archived: ${prevNames.join(', ')}.`
+                            : 'Assign workers from Staff & Attendance or clone a previous crew.'}
+                        </p>
+                      </div>
+                      {prevIds.length > 0 && (
+                        <button
+                          type="button"
+                          onClick={() => clonePreviousHouseTeam(house.id)}
+                          className="shrink-0 rounded-xl bg-emerald-800 px-3 py-1.5 text-[11px] font-extrabold text-white shadow-xs transition hover:bg-emerald-900"
+                        >
+                          Clone Previous Team ({prevIds.length})
+                        </button>
+                      )}
+                    </div>
+                  );
+                })()}
+              </div>
+            )}
+
             <div className="flex items-center justify-between">
               <p className="text-xs font-bold tracking-wider text-slate-500 uppercase">
                 UAE Cooling &amp; Feed System
@@ -761,15 +815,89 @@ export default function PoultryDashboard() {
 
             {/* Silo vs. Bag Inventory Panel */}
             {isSilo ? (
-              <div className="rounded-2xl border border-indigo-200 bg-indigo-50/75 p-3.5 dark:border-indigo-800 dark:bg-indigo-950/35">
-                <div className="flex items-center justify-between">
-                  <span className="text-xs font-extrabold text-indigo-950 dark:text-indigo-200">
-                    {siloCapacityTons}-Ton Bulk Silo Level
-                  </span>
+              <div className="space-y-3 rounded-2xl border border-indigo-200 bg-indigo-50/75 p-3.5 dark:border-indigo-800 dark:bg-indigo-950/35">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs font-extrabold text-indigo-950 dark:text-indigo-200">
+                      {siloCapacityTons}-Ton Bulk Silo Level
+                    </span>
+                    <span className="rounded-full bg-indigo-200/80 px-2 py-0.5 text-[10px] font-black text-indigo-950 dark:bg-indigo-900 dark:text-indigo-200">
+                      Load-Cell Sensor Ready
+                    </span>
+                  </div>
                   <span className="text-xs font-black text-indigo-800 dark:text-indigo-300">
                     {(siloCurrentKg / 1000).toFixed(2)} / {siloCapacityTons} T ({siloFillPct}%)
                   </span>
                 </div>
+
+                {/* Sight-Glass Remaining Tonnage Input (Manager / Super Admin) */}
+                {isManagement && (
+                  <div className="rounded-xl border border-indigo-200/90 bg-white/90 p-2.5 dark:border-indigo-800 dark:bg-slate-900/80">
+                    <div className="mb-1.5 flex flex-wrap items-center justify-between gap-1">
+                      <span className="text-[11px] font-extrabold text-indigo-950 dark:text-indigo-200">
+                        Sight-Glass Remaining Level (Tons):{' '}
+                        <strong>
+                          {house.siloSightGlassTons ?? (siloCurrentKg / 1000).toFixed(2)} T
+                        </strong>
+                      </span>
+                      <span className="text-[10px] font-semibold text-slate-500">
+                        Bottom-quarter visual gauge / scale input
+                      </span>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <input
+                        type="number"
+                        step="0.1"
+                        min="0"
+                        max={siloCapacityTons}
+                        value={sightGlassInput}
+                        onChange={(e) => setSightGlassInput(e.target.value)}
+                        placeholder={`e.g. ${house.siloSightGlassTons ?? (siloCurrentKg / 1000).toFixed(1)} T`}
+                        className="w-28 rounded-lg border border-indigo-300 bg-white px-2.5 py-1.5 text-xs font-bold dark:border-indigo-700 dark:bg-slate-800"
+                      />
+                      <input
+                        type="text"
+                        value={sightGlassNote}
+                        onChange={(e) => setSightGlassNote(e.target.value)}
+                        placeholder="Sight-glass / tonnage drop note..."
+                        className="min-w-[140px] flex-1 rounded-lg border border-indigo-300 bg-white px-2.5 py-1.5 text-xs dark:border-indigo-700 dark:bg-slate-800"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (sightGlassInput === '' || Number(sightGlassInput) < 0) {
+                            notify('Enter valid remaining tonnage (0–20T).', 'warning');
+                            return;
+                          }
+                          recordSiloSightGlassReading({
+                            houseId: house.id,
+                            remainingTons: Number(sightGlassInput),
+                            method: 'manual-sight-glass',
+                            note: sightGlassNote.trim() || 'Visual sight-glass inspection',
+                          });
+                          setSightGlassInput('');
+                          setSightGlassNote('');
+                        }}
+                        className="rounded-lg bg-indigo-700 px-3 py-1.5 text-[11px] font-extrabold text-white hover:bg-indigo-800"
+                      >
+                        Log Reading (T)
+                      </button>
+                    </div>
+                    {(house.siloConsumptionHistory || []).length > 0 && (
+                      <div className="mt-2 flex flex-wrap gap-1.5 border-t border-indigo-100 pt-1.5 text-[10px] font-semibold text-slate-600 dark:border-indigo-900/50 dark:text-slate-300">
+                        {(house.siloConsumptionHistory || []).slice(0, 3).map((sr) => (
+                          <span
+                            key={sr.id}
+                            className="rounded-md bg-indigo-50 px-2 py-0.5 dark:bg-indigo-950/60"
+                          >
+                            {sr.date}: {sr.readingTons}T{' '}
+                            {sr.deltaTons > 0 ? `(-${sr.deltaTons}T used)` : ''}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
                 <div className="mt-2 h-3 w-full overflow-hidden rounded-full bg-indigo-200 dark:bg-indigo-900">
                   <div
                     className={`h-full rounded-full transition-all duration-500 ${

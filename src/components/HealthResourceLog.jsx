@@ -28,6 +28,11 @@ import {
   gallonsToLiters,
   litersToGallons,
 } from '../mockData.js';
+import { History } from 'lucide-react';
+import {
+  detectActiveShiftForTimestamp,
+  getTasksForHouseAndShift,
+} from '../mockData.js';
 import { compressImageFile } from '../services/storageService.js';
 import { useFarm } from '../App.jsx';
 
@@ -57,6 +62,9 @@ export default function HealthResourceLog() {
     executeMedicationTask,
     addIncidentNote,
     acknowledgeIncidentNote,
+    submitTaskForVerification,
+    completeRecurringTaskInstance,
+    recordSiloSightGlassReading,
     notify,
   } = useFarm();
 
@@ -86,7 +94,12 @@ export default function HealthResourceLog() {
     return ['Day Shift (06:00-18:00)', 'Night Shift (18:00-06:00)'];
   }, [state.settings?.shiftConfig?.shifts]);
 
-  const [shift, setShift] = useState(shiftOptions[0] || 'Day Shift (06:00-18:00)');
+  const [shift, setShift] = useState(
+    () =>
+      detectActiveShiftForTimestamp(new Date(), state.settings?.shiftConfig)?.fullLabel ||
+      shiftOptions[0] ||
+      'Day Shift (06:00-18:00)'
+  );
   const [mortalities, setMortalities] = useState(0);
   const [culls, setCulls] = useState(0);
   const [manualTempC, setManualTempC] = useState(
@@ -158,6 +171,14 @@ export default function HealthResourceLog() {
   const [incidentCategory, setIncidentCategory] = useState(ANOMALY_CATEGORIES[0]);
   const [incidentText, setIncidentText] = useState('');
   const [incidentPhoto, setIncidentPhoto] = useState(null);
+  const [showHistoryModal, setShowHistoryModal] = useState(false);
+  const [sightGlassTonsInput, setSightGlassTonsInput] = useState('');
+  const [sightGlassNote, setSightGlassNote] = useState('');
+
+  const detectedFieldShift = useMemo(
+    () => detectActiveShiftForTimestamp(new Date(), state.settings?.shiftConfig),
+    [state.settings?.shiftConfig]
+  );
   const [lightboxPhoto, setLightboxPhoto] = useState(null);
 
   if (!activeHouse) {
@@ -257,7 +278,7 @@ export default function HealthResourceLog() {
 
     addHealthLog({
       houseId: activeHouse.id,
-      shift,
+      shift: isManagement ? shift : detectedFieldShift.fullLabel || detectedFieldShift.label || shift,
       mortalities: Number(mortalities || 0),
       culls: Number(culls || 0),
       manualTempC: Number(manualTempC),
@@ -457,6 +478,637 @@ export default function HealthResourceLog() {
     (n) => n.houseId === activeHouse.id
   );
 
+  const isFieldUser = userRole === 'worker' || userRole === 'supervisor';
+  const fieldOperationalTasks = isFieldUser
+    ? getTasksForHouseAndShift(state, activeHouse.id, detectedFieldShift, userRole)
+    : [];
+
+  const unifiedFieldTasks = isFieldUser
+    ? [
+        ...fieldOperationalTasks.map((t) => ({
+          key: `job-${t.id}`,
+          kind: 'task',
+          sourceType: t.sourceType || 'job',
+          title: t.title,
+          instructions:
+            t.instructions ||
+            t.workerNote ||
+            `Complete inside ${activeHouse.name} during ${detectedFieldShift.label}.`,
+          isDone:
+            t.status === 'Submitted' || t.status === 'Approved' || t.status === 'Completed',
+          raw: t,
+        })),
+        ...houseMedicationTasks.map((med) => ({
+          key: `med-${med.id}`,
+          kind: 'med',
+          title: `Medication: ${med.medicineName}`,
+          instructions: `Dosage: ${med.dosage} • Mix in ${Number(
+            med.waterVolumeGallons || 0
+          ).toLocaleString()} gal water (${med.scheduledTime || 'Scheduled'}).${
+            med.note || med.notes ? ` ${med.note || med.notes}` : ''
+          }`,
+          isDone: med.status === 'Executed' || med.status === 'Completed',
+          canAdminister:
+            userRole === 'supervisor' ||
+            String(med.assignedToRole || med.assignedRole || '').toLowerCase() === 'worker',
+          raw: med,
+        })),
+      ]
+    : [];
+
+  const handleFieldObservationSubmit = (e) => {
+    e.preventDefault();
+    if (!incidentText.trim() && !incidentPhoto) {
+      notify('Enter an observation note or attach a camera photo first.', 'warning');
+      return;
+    }
+    addIncidentNote({
+      houseId: activeHouse.id,
+      category: 'General Observation',
+      note: incidentText.trim() || 'Photo observation attached.',
+      photoUrl: incidentPhoto || null,
+      photo: incidentPhoto || null,
+    });
+    setIncidentText('');
+    setIncidentPhoto(null);
+  };
+
+  if (isFieldUser) {
+    const completedFieldCount = unifiedFieldTasks.filter((t) => t.isDone).length;
+    const siloSightTons =
+      activeHouse.siloSightGlassTons != null
+        ? Number(activeHouse.siloSightGlassTons)
+        : Number((siloCurrentKg / 1000).toFixed(1));
+
+    return (
+      <div className="mx-auto max-w-4xl space-y-5">
+        {/* Compact Top Strip: House Pills, Auto-Detected Shift Badge & History Modal Trigger */}
+        <div className="flex flex-col justify-between gap-3 rounded-3xl border border-slate-200 bg-white/95 p-4 shadow-sm backdrop-blur-sm sm:flex-row sm:items-center dark:border-slate-700 dark:bg-slate-800/95">
+          <div className="space-y-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-100 px-3 py-1 text-xs font-extrabold text-emerald-950 dark:bg-emerald-950/70 dark:text-emerald-300">
+                <Clock className="h-3.5 w-3.5" />
+                {detectedFieldShift.fullLabel} • Auto
+              </span>
+              {isSiloHouse && (
+                <span className="inline-flex items-center gap-1 rounded-full bg-indigo-100 px-2.5 py-1 text-[11px] font-extrabold text-indigo-900 dark:bg-indigo-950/60 dark:text-indigo-200">
+                  <Package className="h-3.5 w-3.5" />
+                  Silo House ({siloSightTons}T Rem.)
+                </span>
+              )}
+            </div>
+
+            <div className="flex flex-wrap items-center gap-2">
+              {selectableHouses.map((h) => {
+                const selected = h.id === activeHouse.id;
+                return (
+                  <button
+                    key={h.id}
+                    type="button"
+                    onClick={() => handleSelectHouse(h.id)}
+                    className={`rounded-2xl px-4 py-2 text-xs font-black transition ${
+                      selected
+                        ? 'bg-emerald-800 text-white shadow-sm'
+                        : 'border border-slate-200 bg-slate-50 text-slate-700 hover:bg-emerald-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200'
+                    }`}
+                  >
+                    {h.name} {h.phase === 'cleaning' ? '• Cleaning' : ''}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => setShowHistoryModal(true)}
+            className="inline-flex shrink-0 items-center justify-center gap-2 self-start rounded-2xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-xs font-extrabold text-slate-800 shadow-xs transition hover:bg-emerald-50 sm:self-center dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
+          >
+            <History className="h-4 w-4 text-emerald-700 dark:text-emerald-400" />
+            <span>History</span>
+            <span className="rounded-full bg-emerald-800 px-2 py-0.5 text-[10px] font-black text-white">
+              {currentShiftLogs.length}
+            </span>
+          </button>
+        </div>
+
+        {/* 1. TOP CARD: Uniform Tactile +/- Field Counters */}
+        {isCleaningLocked ? (
+          <div className="rounded-3xl border-2 border-sky-200 bg-sky-50/95 p-6 text-center shadow-sm dark:border-sky-800 dark:bg-sky-950/40">
+            <p className="text-base font-black text-sky-950 dark:text-sky-200">
+              {activeHouse.name} is in Mandatory Cleaning Phase
+            </p>
+            <p className="mt-1 text-xs font-medium text-sky-800 dark:text-sky-300">
+              Daily mortality, water, and feed logging are paused until new chicks arrive. Complete tasks and observations below.
+            </p>
+          </div>
+        ) : (
+          <form
+            onSubmit={handleSubmitIncrementalLog}
+            className="rounded-3xl border border-slate-200 bg-white/95 p-5 shadow-sm dark:border-slate-700 dark:bg-slate-800/95"
+          >
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+              <h2 className="text-base font-black text-slate-900 dark:text-white">
+                Daily Counters — {activeHouse.name}
+              </h2>
+              <span className="text-xs font-bold text-slate-500 dark:text-slate-400">
+                Active Birds:{' '}
+                <strong className="font-black text-emerald-800 dark:text-emerald-400">
+                  {Math.max(
+                    0,
+                    currentInv.activeChicks - Number(mortalities || 0) - Number(culls || 0)
+                  ).toLocaleString()}
+                </strong>
+              </span>
+            </div>
+
+            <div
+              className={`grid grid-cols-1 gap-3.5 sm:grid-cols-2 ${
+                isSiloHouse ? 'lg:grid-cols-4' : 'lg:grid-cols-5'
+              }`}
+            >
+              {/* Dead Birds */}
+              <div className="flex flex-col items-center justify-between rounded-2xl border border-rose-200 bg-rose-50/60 p-4 dark:border-rose-900/60 dark:bg-rose-950/25">
+                <span className="inline-flex items-center gap-1.5 text-xs font-extrabold text-rose-900 uppercase dark:text-rose-300">
+                  <Skull className="h-4 w-4" />
+                  Dead
+                </span>
+                <div className="my-3 flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setMortalities((v) => Math.max(0, Number(v) - 1))}
+                    aria-label="Decrease Dead count"
+                    className="flex h-12 w-12 items-center justify-center rounded-2xl border border-rose-300 bg-white text-rose-800 shadow-xs transition active:scale-95 dark:border-rose-800 dark:bg-slate-900 dark:text-rose-300"
+                  >
+                    <Minus className="h-5 w-5" />
+                  </button>
+                  <span className="w-12 text-center text-3xl font-black text-slate-900 tabular-nums dark:text-white">
+                    {mortalities}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setMortalities((v) => Number(v) + 1)}
+                    aria-label="Increase Dead count"
+                    className="flex h-12 w-12 items-center justify-center rounded-2xl bg-rose-600 text-white shadow-xs transition active:scale-95 hover:bg-rose-700"
+                  >
+                    <Plus className="h-5 w-5" />
+                  </button>
+                </div>
+                <span className="text-[11px] font-semibold text-rose-700 dark:text-rose-300">
+                  Birds
+                </span>
+              </div>
+
+              {/* Sick / Culls */}
+              <div className="flex flex-col items-center justify-between rounded-2xl border border-amber-200 bg-amber-50/60 p-4 dark:border-amber-900/60 dark:bg-amber-950/25">
+                <span className="text-xs font-extrabold text-amber-900 uppercase dark:text-amber-300">
+                  Culls
+                </span>
+                <div className="my-3 flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => setCulls((v) => Math.max(0, Number(v) - 1))}
+                    aria-label="Decrease Culls count"
+                    className="flex h-12 w-12 items-center justify-center rounded-2xl border border-amber-300 bg-white text-amber-800 shadow-xs transition active:scale-95 dark:border-amber-800 dark:bg-slate-900 dark:text-amber-300"
+                  >
+                    <Minus className="h-5 w-5" />
+                  </button>
+                  <span className="w-12 text-center text-3xl font-black text-slate-900 tabular-nums dark:text-white">
+                    {culls}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setCulls((v) => Number(v) + 1)}
+                    aria-label="Increase Culls count"
+                    className="flex h-12 w-12 items-center justify-center rounded-2xl bg-amber-500 text-white shadow-xs transition active:scale-95 hover:bg-amber-600"
+                  >
+                    <Plus className="h-5 w-5" />
+                  </button>
+                </div>
+                <span className="text-[11px] font-semibold text-amber-800 dark:text-amber-300">
+                  Birds
+                </span>
+              </div>
+
+              {/* Feed Bags (STRICTLY HIDDEN on Silo-Based Houses) */}
+              {!isSiloHouse && (
+                <div className="flex flex-col items-center justify-between rounded-2xl border border-emerald-200 bg-emerald-50/60 p-4 dark:border-emerald-900/60 dark:bg-emerald-950/25">
+                  <span className="inline-flex items-center gap-1.5 text-xs font-extrabold text-emerald-900 uppercase dark:text-emerald-300">
+                    <Wheat className="h-4 w-4" />
+                    Feed Bags
+                  </span>
+                  <div className="my-3 flex items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={() => setBagsConsumed((v) => Math.max(0, Number(v) - 1))}
+                      aria-label="Decrease Feed Bags"
+                      className="flex h-12 w-12 items-center justify-center rounded-2xl border border-emerald-300 bg-white text-emerald-800 shadow-xs transition active:scale-95 dark:border-emerald-800 dark:bg-slate-900 dark:text-emerald-300"
+                    >
+                      <Minus className="h-5 w-5" />
+                    </button>
+                    <span className="w-12 text-center text-3xl font-black text-slate-900 tabular-nums dark:text-white">
+                      {bagsConsumed}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setBagsConsumed((v) => Number(v) + 1)}
+                      aria-label="Increase Feed Bags"
+                      className="flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-700 text-white shadow-xs transition active:scale-95 hover:bg-emerald-800"
+                    >
+                      <Plus className="h-5 w-5" />
+                    </button>
+                  </div>
+                  <span className="text-[11px] font-semibold text-emerald-800 dark:text-emerald-300">
+                    {bagsConsumed * bagWeightKg} kg ({bagWeightKg}kg/bag)
+                  </span>
+                </div>
+              )}
+
+              {/* Water (Gallons) */}
+              <div className="flex flex-col items-center justify-between rounded-2xl border border-sky-200 bg-sky-50/60 p-4 dark:border-sky-900/60 dark:bg-sky-950/25">
+                <span className="inline-flex items-center gap-1.5 text-xs font-extrabold text-sky-900 uppercase dark:text-sky-300">
+                  <Droplets className="h-4 w-4" />
+                  Water (Gallons)
+                </span>
+                <div className="my-3 flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setWaterGallonsInput((v) => Math.max(0, Math.round(Number(v || 0) - 25)))
+                    }
+                    aria-label="Decrease Water Gallons"
+                    className="flex h-12 w-12 items-center justify-center rounded-2xl border border-sky-300 bg-white text-sky-800 shadow-xs transition active:scale-95 dark:border-sky-800 dark:bg-slate-900 dark:text-sky-300"
+                  >
+                    <Minus className="h-5 w-5" />
+                  </button>
+                  <input
+                    type="number"
+                    min="0"
+                    value={waterGallonsInput}
+                    onChange={(e) => setWaterGallonsInput(Math.max(0, Number(e.target.value || 0)))}
+                    aria-label="Water in Gallons"
+                    className="w-16 bg-transparent text-center text-2xl font-black text-slate-900 tabular-nums focus:outline-none dark:text-white"
+                  />
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setWaterGallonsInput((v) => Math.round(Number(v || 0) + 25))
+                    }
+                    aria-label="Increase Water Gallons"
+                    className="flex h-12 w-12 items-center justify-center rounded-2xl bg-sky-600 text-white shadow-xs transition active:scale-95 hover:bg-sky-700"
+                  >
+                    <Plus className="h-5 w-5" />
+                  </button>
+                </div>
+                <span className="text-[11px] font-semibold text-sky-800 dark:text-sky-300">
+                  Gallons (±25 gal)
+                </span>
+              </div>
+
+              {/* House Temp (°C) */}
+              <div className="flex flex-col items-center justify-between rounded-2xl border border-teal-200 bg-teal-50/60 p-4 dark:border-teal-900/60 dark:bg-teal-950/25">
+                <span className="inline-flex items-center gap-1.5 text-xs font-extrabold text-teal-900 uppercase dark:text-teal-300">
+                  <Thermometer className="h-4 w-4" />
+                  Temp (°C)
+                </span>
+                <div className="my-3 flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setManualTempC((t) => Number((Number(t) - 0.5).toFixed(1)))
+                    }
+                    aria-label="Decrease House Temperature"
+                    className="flex h-12 w-12 items-center justify-center rounded-2xl border border-teal-300 bg-white text-teal-800 shadow-xs transition active:scale-95 dark:border-teal-800 dark:bg-slate-900 dark:text-teal-300"
+                  >
+                    <Minus className="h-5 w-5" />
+                  </button>
+                  <span className="w-16 text-center text-2xl font-black text-slate-900 tabular-nums dark:text-white">
+                    {manualTempC}°
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setManualTempC((t) => Number((Number(t) + 0.5).toFixed(1)))
+                    }
+                    aria-label="Increase House Temperature"
+                    className="flex h-12 w-12 items-center justify-center rounded-2xl bg-teal-600 text-white shadow-xs transition active:scale-95 hover:bg-teal-700"
+                  >
+                    <Plus className="h-5 w-5" />
+                  </button>
+                </div>
+                <span className="text-[11px] font-semibold text-teal-800 dark:text-teal-300">
+                  Celsius (±0.5°C)
+                </span>
+              </div>
+            </div>
+
+            <button
+              type="submit"
+              className="mt-5 flex w-full items-center justify-center gap-2 rounded-2xl bg-emerald-800 py-3.5 text-sm font-black text-white shadow-md transition hover:bg-emerald-900 active:scale-[0.99]"
+            >
+              <Lock className="h-4 w-4" />
+              Submit &amp; Lock Shift Log
+            </button>
+          </form>
+        )}
+
+        {/* 2. MIDDLE CARD: Clean Numbered Tasks (Task 1, Task 2, Task 3...) — Zero IDs or Filters */}
+        <section className="rounded-3xl border border-slate-200 bg-white/95 p-5 shadow-sm dark:border-slate-700 dark:bg-slate-800/95">
+          <div className="mb-3.5 flex items-center justify-between gap-2">
+            <h3 className="text-base font-black text-slate-900 dark:text-white">
+              Today&apos;s Tasks — {activeHouse.name}
+            </h3>
+            <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-extrabold text-slate-700 dark:bg-slate-900 dark:text-slate-300">
+              {completedFieldCount} / {unifiedFieldTasks.length} Done
+            </span>
+          </div>
+
+          {unifiedFieldTasks.length === 0 ? (
+            <p className="rounded-2xl border border-dashed border-slate-200 p-4 text-center text-xs font-semibold text-slate-500 dark:border-slate-700 dark:text-slate-400">
+              No scheduled tasks remaining for {activeHouse.name} this shift.
+            </p>
+          ) : (
+            <div className="space-y-2.5">
+              {unifiedFieldTasks.map((item, idx) => (
+                <div
+                  key={item.key}
+                  className={`flex flex-col justify-between gap-3 rounded-2xl border p-4 sm:flex-row sm:items-center ${
+                    item.isDone
+                      ? 'border-emerald-200 bg-emerald-50/70 dark:border-emerald-900/50 dark:bg-emerald-950/25'
+                      : item.kind === 'med'
+                      ? 'border-indigo-200 bg-indigo-50/60 dark:border-indigo-900/50 dark:bg-indigo-950/25'
+                      : 'border-slate-200 bg-slate-50/80 dark:border-slate-700 dark:bg-slate-900/60'
+                  }`}
+                >
+                  <div className="space-y-1">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="rounded-full bg-slate-900 px-2.5 py-0.5 text-[11px] font-black text-white dark:bg-slate-700">
+                        Task {idx + 1}
+                      </span>
+                      <span className="text-sm font-black text-slate-900 dark:text-white">
+                        {item.title}
+                      </span>
+                    </div>
+                    <p className="text-xs font-medium text-slate-600 dark:text-slate-300">
+                      {item.instructions}
+                    </p>
+                  </div>
+
+                  <div className="shrink-0">
+                    {item.isDone ? (
+                      <span className="inline-flex items-center gap-1.5 rounded-2xl bg-emerald-700 px-4 py-2 text-xs font-black text-white">
+                        <CheckCircle2 className="h-4 w-4" />
+                        {item.kind === 'med' ? 'Administered' : 'Done'}
+                      </span>
+                    ) : item.kind === 'med' ? (
+                      item.canAdminister ? (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            executeMedicationTask(
+                              item.raw.id,
+                              'Administered per scheduled water ratio'
+                            )
+                          }
+                          className="w-full rounded-2xl bg-indigo-700 px-5 py-2.5 text-xs font-black text-white shadow-sm transition hover:bg-indigo-800 active:scale-95 sm:w-auto"
+                        >
+                          Mark Administered
+                        </button>
+                      ) : (
+                        <span className="inline-flex rounded-2xl border border-amber-300 bg-amber-50 px-3 py-1.5 text-[11px] font-extrabold text-amber-800 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
+                          Supervisor Med Task
+                        </span>
+                      )
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (item.sourceType === 'recurring') {
+                            completeRecurringTaskInstance({
+                              completionKey: item.raw.completionKey,
+                              ruleId: item.raw.recurringRuleId,
+                              houseId: activeHouse.id,
+                              note: 'Completed on shift',
+                            });
+                          } else {
+                            submitTaskForVerification({
+                              taskId: item.raw.id,
+                              workerNote: 'Completed during field shift',
+                            });
+                          }
+                        }}
+                        className="w-full rounded-2xl bg-emerald-700 px-5 py-2.5 text-xs font-black text-white shadow-sm transition hover:bg-emerald-800 active:scale-95 sm:w-auto"
+                      >
+                        Mark Done
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+
+        {/* 3. BOTTOM CARD: Single-Box Observation & Camera Photo Upload */}
+        <form
+          onSubmit={handleFieldObservationSubmit}
+          className="rounded-3xl border border-slate-200 bg-white/95 p-5 shadow-sm dark:border-slate-700 dark:bg-slate-800/95"
+        >
+          <h3 className="mb-3 text-base font-black text-slate-900 dark:text-white">
+            Observation &amp; Photo
+          </h3>
+
+          <div className="space-y-3">
+            <div className="flex flex-wrap items-center gap-3">
+              <label className="inline-flex cursor-pointer items-center gap-2 rounded-2xl border-2 border-dashed border-emerald-400 bg-emerald-50/70 px-5 py-3 text-xs font-black text-emerald-900 transition hover:bg-emerald-100 dark:border-emerald-700 dark:bg-emerald-950/30 dark:text-emerald-200">
+                <Camera className="h-5 w-5 text-emerald-700 dark:text-emerald-400" />
+                <span>{incidentPhoto ? 'Change Camera Photo' : 'Take / Upload Photo'}</span>
+                <input
+                  type="file"
+                  accept="image/*"
+                  capture="environment"
+                  className="hidden"
+                  onChange={(e) => handleIncidentPhotoChange(e.target.files?.[0])}
+                />
+              </label>
+
+              {incidentPhoto && (
+                <div className="relative h-14 w-14 overflow-hidden rounded-2xl border border-slate-300">
+                  <img
+                    src={incidentPhoto}
+                    alt="Observation preview"
+                    className="h-full w-full object-cover"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setIncidentPhoto(null)}
+                    aria-label="Remove photo"
+                    className="absolute top-0.5 right-0.5 rounded-full bg-slate-900/80 p-0.5 text-white"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </div>
+              )}
+            </div>
+
+            <textarea
+              rows={3}
+              value={incidentText}
+              onChange={(e) => setIncidentText(e.target.value)}
+              placeholder="Write any quick house observation, fan/nipple issue, or flock note..."
+              className="w-full rounded-2xl border border-slate-300 bg-slate-50 px-4 py-3 text-sm font-medium text-slate-900 focus:border-emerald-700 focus:bg-white focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-white"
+            />
+
+            <button
+              type="submit"
+              className="w-full rounded-2xl bg-slate-900 py-3.5 text-xs font-black text-white shadow-sm transition hover:bg-slate-800 active:scale-[0.99] dark:bg-emerald-700 dark:hover:bg-emerald-800"
+            >
+              Submit Observation
+            </button>
+          </div>
+        </form>
+
+        {/* Locked Shift Entries & Observations History Modal */}
+        {showHistoryModal && (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/70 p-4 backdrop-blur-sm"
+            onClick={() => setShowHistoryModal(false)}
+          >
+            <div
+              className="max-h-[85vh] w-full max-w-2xl overflow-y-auto rounded-3xl bg-white p-5 shadow-2xl dark:bg-slate-900"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="mb-4 flex items-center justify-between">
+                <div>
+                  <h3 className="text-base font-black text-slate-900 dark:text-white">
+                    Logged Entries History — {activeHouse.name}
+                  </h3>
+                  <p className="text-xs font-medium text-slate-500 dark:text-slate-400">
+                    Entries lock automatically upon submission ({activeShiftDate})
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowHistoryModal(false)}
+                  className="rounded-full bg-slate-100 p-2 text-slate-700 hover:bg-slate-200 dark:bg-slate-800 dark:text-slate-200"
+                  aria-label="Close history modal"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+
+              <div className="space-y-2.5">
+                {currentShiftLogs.length === 0 ? (
+                  <p className="rounded-2xl border border-dashed border-slate-200 p-4 text-center text-xs font-semibold text-slate-500">
+                    No locked entries recorded yet for {activeHouse.name} today.
+                  </p>
+                ) : (
+                  currentShiftLogs.map((log) => (
+                    <div
+                      key={log.id}
+                      className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border border-slate-200 bg-slate-50 p-3 text-xs dark:border-slate-700 dark:bg-slate-800"
+                    >
+                      <div>
+                        <span className="inline-flex items-center gap-1 font-black text-emerald-800 dark:text-emerald-400">
+                          <Lock className="h-3 w-3" /> {log.shift}
+                        </span>
+                        <p className="text-[11px] text-slate-500 dark:text-slate-400">
+                          {new Date(log.timestamp).toLocaleTimeString()} • {log.loggedBy}
+                        </p>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2 font-bold">
+                        <span className="rounded-lg bg-rose-100 px-2 py-0.5 text-rose-800 dark:bg-rose-950/60 dark:text-rose-300">
+                          Dead: {log.mortalities}
+                        </span>
+                        <span className="rounded-lg bg-amber-100 px-2 py-0.5 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300">
+                          Culls: {log.culls}
+                        </span>
+                        {!isSiloHouse && (
+                          <span className="rounded-lg bg-emerald-100 px-2 py-0.5 text-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300">
+                            Bags: {log.feedBags ?? Math.round((log.feedKg || 0) / bagWeightKg)}
+                          </span>
+                        )}
+                        <span className="rounded-lg bg-sky-100 px-2 py-0.5 text-sky-800 dark:bg-sky-950/60 dark:text-sky-300">
+                          {log.waterGallons} gal
+                        </span>
+                        <span className="rounded-lg bg-teal-100 px-2 py-0.5 text-teal-800 dark:bg-teal-950/60 dark:text-teal-300">
+                          {log.manualTempC}°C
+                        </span>
+                      </div>
+                    </div>
+                  ))
+                )}
+              </div>
+
+              {houseIncidents.length > 0 && (
+                <div className="mt-5 border-t border-slate-200 pt-4 dark:border-slate-700">
+                  <h4 className="mb-2 text-xs font-extrabold text-slate-600 uppercase dark:text-slate-400">
+                    Recent Observations ({houseIncidents.length})
+                  </h4>
+                  <div className="space-y-2">
+                    {houseIncidents.slice(0, 6).map((inc) => {
+                      const thumb = inc.photo || inc.photoDataUrl || inc.photoUrl;
+                      return (
+                        <div
+                          key={inc.id}
+                          className="flex items-start gap-2.5 rounded-2xl border border-slate-200 p-2.5 text-xs dark:border-slate-700"
+                        >
+                          {thumb && (
+                            <img
+                              src={thumb}
+                              alt="Obs"
+                              onClick={() => setLightboxPhoto(thumb)}
+                              className="h-10 w-10 shrink-0 cursor-pointer rounded-xl object-cover"
+                            />
+                          )}
+                          <div>
+                            <p className="font-semibold text-slate-800 dark:text-slate-200">
+                              {inc.note}
+                            </p>
+                            <p className="text-[10px] text-slate-500">
+                              {inc.reportedBy} •{' '}
+                              {new Date(inc.reportedAt || inc.timestamp || Date.now()).toLocaleString()}
+                            </p>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* Photo Lightbox Modal */}
+        {lightboxPhoto && (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/80 p-4 backdrop-blur-sm"
+            onClick={() => setLightboxPhoto(null)}
+          >
+            <div
+              className="relative max-w-2xl overflow-hidden rounded-3xl bg-white p-2 shadow-2xl"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <button
+                type="button"
+                onClick={() => setLightboxPhoto(null)}
+                className="absolute top-3 right-3 rounded-full bg-slate-900/80 p-1.5 text-white"
+              >
+                <X className="h-4 w-4" />
+              </button>
+              <img
+                src={lightboxPhoto}
+                alt="Observation full view"
+                className="max-h-[75vh] w-auto rounded-2xl object-contain"
+              />
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
       {/* Header & House Selector */}
@@ -484,7 +1136,7 @@ export default function HealthResourceLog() {
           </p>
           {isManagement && (
             <p className="mt-0.5 text-[11px] font-semibold text-emerald-700 dark:text-emerald-400">
-              Management Note: Weekly sample bird weighing is now recorded in Contracts &amp; Reports.
+              Management Note: Weekly sample bird weighing is recorded in Weights &amp; Reports.
             </p>
           )}
         </div>
@@ -998,6 +1650,54 @@ export default function HealthResourceLog() {
                 className="w-full rounded-xl bg-indigo-700 py-2.5 text-xs font-extrabold text-white hover:bg-indigo-800"
               >
                 + Record Silo Refill
+              </button>
+            </div>
+          </div>
+
+          {/* Silo Sight-Glass / Remaining Tonnage (Future Load-Cell Sensor Ready) */}
+          <div className="mt-4 border-t border-indigo-200/80 pt-4 dark:border-indigo-800">
+            <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+              <span className="text-xs font-extrabold text-indigo-950 dark:text-indigo-200">
+                Sight-Glass Remaining Tonnage Reading (Tons) — Load-Cell Sensor Ready
+              </span>
+              <span className="rounded-full bg-indigo-100 px-2.5 py-0.5 text-[10px] font-black text-indigo-900 dark:bg-indigo-900/50 dark:text-indigo-200">
+                Current: {activeHouse.siloSightGlassTons ?? (siloCurrentKg / 1000).toFixed(2)} T
+              </span>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <input
+                type="number"
+                step="0.1"
+                min="0"
+                max={siloCapacityTons}
+                value={sightGlassTonsInput}
+                onChange={(e) => setSightGlassTonsInput(e.target.value)}
+                placeholder={`e.g. ${(siloCurrentKg / 1000).toFixed(1)} T`}
+                className="w-36 rounded-xl border border-indigo-300 bg-white px-3 py-2 text-xs font-bold dark:border-indigo-700 dark:bg-slate-900"
+              />
+              <input
+                type="text"
+                value={sightGlassNote}
+                onChange={(e) => setSightGlassNote(e.target.value)}
+                placeholder="Bottom-quarter sight-glass or scale check..."
+                className="min-w-[180px] flex-1 rounded-xl border border-indigo-300 bg-white px-3 py-2 text-xs dark:border-indigo-700 dark:bg-slate-900"
+              />
+              <button
+                type="button"
+                onClick={() => {
+                  if (sightGlassTonsInput === '' || Number(sightGlassTonsInput) < 0) return;
+                  recordSiloSightGlassReading({
+                    houseId: activeHouse.id,
+                    remainingTons: Number(sightGlassTonsInput),
+                    method: 'manual-sight-glass',
+                    note: sightGlassNote.trim() || 'Manual sight-glass reading logged',
+                  });
+                  setSightGlassTonsInput('');
+                  setSightGlassNote('');
+                }}
+                className="rounded-xl bg-slate-900 px-4 py-2 text-xs font-extrabold text-white hover:bg-slate-800 dark:bg-indigo-600 dark:hover:bg-indigo-700"
+              >
+                Update Sight-Glass (T)
               </button>
             </div>
           </div>

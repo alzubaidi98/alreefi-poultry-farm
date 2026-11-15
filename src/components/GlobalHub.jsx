@@ -189,6 +189,63 @@ export default function GlobalHub() {
   const totalMortalitiesToday = todaysLogs.reduce((sum, l) => sum + Number(l.mortalities || 0), 0);
   const totalCullsToday = todaysLogs.reduce((sum, l) => sum + Number(l.culls || 0), 0);
 
+  // Day-over-day (+/- vs. yesterday) delta calculations synced with Header Telemetry
+  const { liveBirdsDelta, mortDelta, tempDelta } = useMemo(() => {
+    const activeLogs = (state.healthLogs || []).filter((log) => activeHouseIds.has(log.houseId));
+    const datesDesc = Array.from(new Set(activeLogs.map((l) => l.date).filter(Boolean))).sort((a, b) =>
+      b.localeCompare(a)
+    );
+    const prevDate = datesDesc[1] || '';
+    const prevMortalities = prevDate
+      ? activeLogs
+          .filter((l) => l.date === prevDate)
+          .reduce((sum, l) => sum + Number(l.mortalities || 0), 0)
+      : activeCultivationHouses.reduce((sum, h) => {
+          const ds = h.dailySeries || [];
+          return sum + Number(ds.length >= 2 ? ds[ds.length - 2]?.mortalities || 0 : 0);
+        }, 0);
+
+    const avgTempTodayNum =
+      activeCultivationHouses.length > 0
+        ? activeCultivationHouses.reduce(
+            (sum, h) =>
+              sum +
+              (Number(h.zones?.start || 0) +
+                Number(h.zones?.middle || 0) +
+                Number(h.zones?.end || 0)) /
+                3,
+            0
+          ) / activeCultivationHouses.length
+        : 0;
+    const avgTempPrevNum =
+      activeCultivationHouses.length > 0
+        ? activeCultivationHouses.reduce((sum, h) => {
+            const ds = h.dailySeries || [];
+            const fallback =
+              (Number(h.zones?.start || 0) +
+                Number(h.zones?.middle || 0) +
+                Number(h.zones?.end || 0)) /
+              3;
+            return sum + Number(ds.length >= 2 ? ds[ds.length - 2]?.avgTempC ?? fallback : fallback);
+          }, 0) / activeCultivationHouses.length
+        : 0;
+
+    return {
+      liveBirdsDelta: -(totalMortalitiesToday + totalCullsToday),
+      mortDelta: totalMortalitiesToday - prevMortalities,
+      tempDelta:
+        activeCultivationHouses.length > 0
+          ? Number((avgTempTodayNum - avgTempPrevNum).toFixed(1))
+          : 0,
+    };
+  }, [
+    state.healthLogs,
+    activeHouseIds,
+    activeCultivationHouses,
+    totalMortalitiesToday,
+    totalCullsToday,
+  ]);
+
   // Avg inside vs outside temperature strictly across active houses
   const avgInsideTemp =
     activeCultivationHouses.length > 0
@@ -433,9 +490,14 @@ export default function GlobalHub() {
                 <p className="text-[10px] font-bold tracking-wider text-slate-400 uppercase">
                   Live Bird Count
                 </p>
-                <p className="text-sm font-black text-emerald-300">
-                  {totalActiveChicks.toLocaleString()}
-                </p>
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <p className="text-sm font-black text-emerald-300">
+                    {totalActiveChicks.toLocaleString()}
+                  </p>
+                  <span className="rounded-full bg-amber-950/80 px-1.5 py-0.5 text-[10px] font-black text-amber-300">
+                    {liveBirdsDelta >= 0 ? `+${liveBirdsDelta}` : liveBirdsDelta} vs yest
+                  </span>
+                </div>
                 <p className="text-[10px] font-medium text-slate-300">
                   Survival {farmSurvivalPct}%
                 </p>
@@ -449,7 +511,18 @@ export default function GlobalHub() {
                 <p className="text-[10px] font-bold tracking-wider text-slate-400 uppercase">
                   Mortalities Today
                 </p>
-                <p className="text-sm font-black text-red-300">{totalMortalitiesToday} Dead</p>
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <p className="text-sm font-black text-red-300">{totalMortalitiesToday} Dead</p>
+                  <span
+                    className={`rounded-full px-1.5 py-0.5 text-[10px] font-black ${
+                      mortDelta > 0
+                        ? 'bg-rose-950/80 text-rose-300'
+                        : 'bg-emerald-950/80 text-emerald-300'
+                    }`}
+                  >
+                    {mortDelta >= 0 ? `+${mortDelta}` : mortDelta} vs yest
+                  </span>
+                </div>
                 <p className="text-[10px] font-medium text-amber-300">
                   +{totalCullsToday} Culls ({effectiveLogDate})
                 </p>
@@ -463,10 +536,15 @@ export default function GlobalHub() {
                 <p className="text-[10px] font-bold tracking-wider text-slate-400 uppercase">
                   Inside vs UAE Out
                 </p>
-                <p className="text-sm font-black text-white">
-                  {avgInsideTemp}°C <span className="text-slate-400">/</span>{' '}
-                  <span className="text-red-300">{avgOutsideTemp}°C</span>
-                </p>
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <p className="text-sm font-black text-white">
+                    {avgInsideTemp}°C <span className="text-slate-400">/</span>{' '}
+                    <span className="text-red-300">{avgOutsideTemp}°C</span>
+                  </p>
+                  <span className="rounded-full bg-sky-950/80 px-1.5 py-0.5 text-[10px] font-black text-sky-300">
+                    {tempDelta >= 0 ? `+${tempDelta}°C` : `${tempDelta}°C`} vs yest
+                  </span>
+                </div>
                 <p className="text-[10px] font-medium text-emerald-300">
                   -{coolingDelta}°C Cooling Δ
                 </p>

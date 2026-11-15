@@ -18,16 +18,20 @@ import {
 } from 'recharts';
 import {
   CheckSquare,
+  ChevronDown,
   Columns2,
   Download,
+  Droplets,
   FileText,
   Gauge,
   HeartPulse,
   Layers,
   Scale,
+  Search,
   TrendingUp,
   Wheat,
   Wind,
+  X,
 } from 'lucide-react';
 import html2canvas from 'html2canvas';
 import { jsPDF } from 'jspdf';
@@ -245,6 +249,8 @@ export default function Analytics() {
 
   const [selectedCycleId, setSelectedCycleId] = useState(cycles[0]?.cycleId || 'cycle-13');
   const [compareCycleId, setCompareCycleId] = useState('none');
+  const [isHouseDropdownOpen, setIsHouseDropdownOpen] = useState(false);
+  const [houseDropdownSearch, setHouseDropdownSearch] = useState('');
   const [selectedHouseIds, setSelectedHouseIds] = useState(() => {
     const defaults = (visibleHouses || []).filter((h) => h.isActive !== false).slice(0, 3).map((h) => h.id);
     return defaults.length > 0 ? defaults : ['house-1', 'house-5'];
@@ -305,17 +311,50 @@ export default function Analytics() {
   const chartSeries = useMemo(() => {
     if (!activeCycle) return [];
     return (activeCycle.dailySeries || []).map((pt, idx) => {
-      const compPt = compareCycle?.dailySeries?.[idx];
+      const compPt =
+        compareCycle?.dailySeries?.find((d) => d.day === pt.day) ??
+        compareCycle?.dailySeries?.[idx];
       const baseCo2 = pt.co2Ppm ?? Math.round(1450 + pt.day * 42 + (pt.day % 5) * 65);
       const basePressure = pt.negativePressurePa ?? Number((28 - pt.day * 0.18 + Math.sin(pt.day) * 2.2).toFixed(1));
+      const baseHumidity = Math.round(
+        Number(
+          pt.humidityPct ??
+            pt.humidity ??
+            54 + pt.day * 0.25 + Math.sin(pt.day * 0.7) * 4
+        )
+      );
+      const avgTempVal = Number(
+        (pt.avgTempC ?? ((pt.startTemp + pt.middleTemp + pt.endTemp) / 3 || 29)).toFixed(1)
+      );
+      const compAvgTempVal = compPt
+        ? Number(
+            (
+              compPt.avgTempC ??
+              ((compPt.startTemp + compPt.middleTemp + compPt.endTemp) / 3 || 29)
+            ).toFixed(1)
+          )
+        : null;
+      const compHumidityVal = compPt
+        ? Math.round(
+            Number(
+              compPt.humidityPct ??
+                compPt.humidity ??
+                56 + (compPt.day || pt.day) * 0.22 + Math.cos((compPt.day || pt.day) * 0.65) * 4
+            )
+          )
+        : null;
 
       const row = {
         ...pt,
+        avgTempC: avgTempVal,
+        humidityPct: baseHumidity,
         outsideTemp: pt.outsideTemp,
         co2Ppm: baseCo2,
         negativePressurePa: basePressure,
         compareMortality: compPt ? compPt.mortalities : null,
         compareWeightGrams: compPt ? compPt.avgWeightGrams : null,
+        compareAvgTempC: compAvgTempVal,
+        compareHumidityPct: compHumidityVal,
       };
 
       selectedHouses.forEach((h) => {
@@ -333,6 +372,9 @@ export default function Analytics() {
         const nh3Val =
           directHousePt?.ammoniaPpm ??
           Number(Math.max(2, pt.ammoniaPpm + factor.tempOffset * 1.6).toFixed(1));
+        const humVal =
+          directHousePt?.humidityPct ??
+          Math.min(78, Math.max(40, Math.round(baseHumidity + factor.tempOffset * 2)));
         const mortVal = directHousePt?.mortalities ?? Math.round(pt.mortalities * factor.mortMult);
         const cullVal = directHousePt?.culls ?? Math.round(pt.culls * factor.mortMult);
         const weightVal =
@@ -347,6 +389,7 @@ export default function Analytics() {
         row[`co2_${h.id}`] = co2Val;
         row[`pressure_${h.id}`] = pressVal;
         row[`nh3_${h.id}`] = nh3Val;
+        row[`hum_${h.id}`] = humVal;
         row[`mort_${h.id}`] = mortVal;
         row[`culls_${h.id}`] = cullVal;
         row[`weight_${h.id}`] = weightVal;
@@ -360,6 +403,7 @@ export default function Analytics() {
         row.singleMiddleTemp = row[`middleTemp_${only.id}`];
         row.singleEndTemp = row[`endTemp_${only.id}`];
         row.singleNh3 = row[`nh3_${only.id}`];
+        row.singleHumidity = row[`hum_${only.id}`];
         row.singleCo2 = row[`co2_${only.id}`];
         row.singlePressure = row[`pressure_${only.id}`];
         row.singleMortalities = row[`mort_${only.id}`];
@@ -463,10 +507,133 @@ export default function Analytics() {
     );
   }
 
-  const effectiveTempMode = chartStyle === 'side-by-side' ? 'line' : chartStyle;
+  const effectiveTempMode =
+    compareCycle && chartStyle !== 'bar'
+      ? 'line'
+      : chartStyle === 'side-by-side'
+      ? 'line'
+      : chartStyle;
+  const effectiveHumidityMode =
+    compareCycle && chartStyle !== 'bar'
+      ? 'line'
+      : chartStyle === 'side-by-side'
+      ? 'line'
+      : chartStyle;
   const effectiveAirMode = chartStyle === 'side-by-side' ? 'area' : chartStyle;
-  const effectiveMortMode = chartStyle === 'side-by-side' ? 'bar' : chartStyle;
-  const effectiveWeightMode = chartStyle === 'side-by-side' ? 'line' : chartStyle;
+  const effectiveMortMode =
+    compareCycle && chartStyle !== 'bar'
+      ? 'line'
+      : chartStyle === 'side-by-side'
+      ? 'bar'
+      : chartStyle;
+  const effectiveWeightMode =
+    compareCycle && chartStyle !== 'bar'
+      ? 'line'
+      : chartStyle === 'side-by-side'
+      ? 'line'
+      : chartStyle;
+
+  const renderHumidityChart = (mode) => {
+    if (selectedHouses.length === 0) {
+      return (
+        <div className="flex h-full items-center justify-center text-xs font-bold text-slate-500">
+          Select one or more houses above to plot Relative Humidity (%).
+        </div>
+      );
+    }
+
+    if (mode === 'bar') {
+      return (
+        <ResponsiveContainer width="100%" height="100%">
+          <BarChart data={chartSeries} margin={{ top: 10, right: 16, left: 0, bottom: 5 }}>
+            <CartesianGrid strokeDasharray="3 3" stroke="#cbd5e1" />
+            <XAxis dataKey="day" tick={{ fontSize: 11 }} />
+            <YAxis domain={[35, 85]} unit="%" tick={{ fontSize: 11 }} />
+            <Tooltip />
+            <Legend />
+            <ReferenceArea y1={50} y2={65} fill="#0ea5e9" fillOpacity={0.14} />
+            <Bar
+              dataKey={selectedHouses.length === 1 ? 'singleHumidity' : 'humidityPct'}
+              name="Current Cycle Humidity (%)"
+              fill="#0284c7"
+              radius={[4, 4, 0, 0]}
+            />
+            {compareCycle && (
+              <Bar
+                dataKey="compareHumidityPct"
+                name={`Compare (${compareCycle.name.split(' ')[1]}) %`}
+                fill="#f59e0b"
+                radius={[4, 4, 0, 0]}
+              />
+            )}
+          </BarChart>
+        </ResponsiveContainer>
+      );
+    }
+
+    return (
+      <ResponsiveContainer width="100%" height="100%">
+        <LineChart data={chartSeries} margin={{ top: 10, right: 16, left: 0, bottom: 5 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke="#cbd5e1" />
+          <XAxis dataKey="day" tick={{ fontSize: 11 }} />
+          <YAxis domain={[35, 85]} unit="%" tick={{ fontSize: 11 }} />
+          <Tooltip />
+          <Legend />
+          <ReferenceArea
+            y1={50}
+            y2={65}
+            fill="#0ea5e9"
+            fillOpacity={0.14}
+            label={{ value: 'Optimal 50–65% RH', position: 'insideTopLeft', fontSize: 10, fill: '#0369a1' }}
+          />
+          {selectedHouses.length === 1 && (
+            <Line
+              type="monotone"
+              dataKey="singleHumidity"
+              name={`${selectedHouses[0].name} Humidity (%)`}
+              stroke="#0284c7"
+              strokeWidth={2.6}
+              dot={false}
+            />
+          )}
+          {selectedHouses.length > 1 && (
+            <Line
+              type="monotone"
+              dataKey="humidityPct"
+              name={`Current Cycle (${activeCycle?.name?.split('(')[0]?.trim() || 'Current'}) %`}
+              stroke="#0284c7"
+              strokeWidth={2.8}
+              dot={false}
+            />
+          )}
+          {selectedHouses.length > 1 &&
+            !compareCycle &&
+            selectedHouses.map((h) => (
+              <Line
+                key={h.id}
+                type="monotone"
+                dataKey={`hum_${h.id}`}
+                name={`${h.name} %`}
+                stroke={h.color}
+                strokeWidth={1.8}
+                dot={false}
+              />
+            ))}
+          {compareCycle && (
+            <Line
+              type="monotone"
+              dataKey="compareHumidityPct"
+              name={`Previous (${compareCycle.name.split('(')[0].trim()}) %`}
+              stroke="#d97706"
+              strokeDasharray="5 4"
+              strokeWidth={2.4}
+              dot={false}
+            />
+          )}
+        </LineChart>
+      </ResponsiveContainer>
+    );
+  };
 
   const renderTempChart = (mode) => {
     if (selectedHouses.length === 0) {
@@ -580,18 +747,30 @@ export default function Analytics() {
               <Line yAxisId="nh3" type="monotone" dataKey="singleNh3" name="NH₃ (ppm)" stroke="#9333ea" strokeDasharray="3 3" strokeWidth={2} dot={false} />
             </>
           ) : (
-            selectedHouses.map((h) => (
-              <Line
-                key={h.id}
-                yAxisId="temp"
-                type="monotone"
-                dataKey={`avgTemp_${h.id}`}
-                name={`${h.name} Avg °C`}
-                stroke={h.color}
-                strokeWidth={2.5}
-                dot={false}
-              />
-            ))
+              selectedHouses.map((h) => (
+                <Line
+                  key={h.id}
+                  yAxisId="temp"
+                  type="monotone"
+                  dataKey={`avgTemp_${h.id}`}
+                  name={`${h.name} Avg °C`}
+                  stroke={h.color}
+                  strokeWidth={2.5}
+                  dot={false}
+                />
+              ))
+            )}
+          {compareCycle && (
+            <Line
+              yAxisId="temp"
+              type="monotone"
+              dataKey="compareAvgTempC"
+              name={`Previous (${compareCycle.name.split('(')[0].trim()}) Avg °C`}
+              stroke="#475569"
+              strokeDasharray="5 4"
+              strokeWidth={2.2}
+              dot={false}
+            />
           )}
         </LineChart>
       </ResponsiveContainer>
@@ -720,19 +899,38 @@ export default function Analytics() {
             <YAxis tick={{ fontSize: 11 }} />
             <Tooltip />
             <Legend />
-            {selectedHouses.length === 1 ? (
-              <>
-                <Line type="monotone" dataKey="singleMortalities" name="Dead (Mortalities)" stroke="#dc2626" strokeWidth={2.5} dot={false} />
-                <Line type="monotone" dataKey="singleCulls" name="Sick (Culls)" stroke="#d97706" strokeWidth={2} dot={false} />
-              </>
-            ) : (
-              selectedHouses.map((h) => (
-                <Line key={h.id} type="monotone" dataKey={`mort_${h.id}`} name={`${h.name} Dead`} stroke={h.color} strokeWidth={2.3} dot={false} />
-              ))
+            {compareCycle && (
+              <Line
+                type="monotone"
+                dataKey={selectedHouses.length === 1 ? 'singleMortalities' : 'mortalities'}
+                name={`Current (${activeCycle?.name?.split('(')[0]?.trim() || 'Current'}) Dead`}
+                stroke="#dc2626"
+                strokeWidth={2.7}
+                dot={false}
+              />
             )}
             {compareCycle && (
-              <Line type="monotone" dataKey="compareMortality" name={`Compare (${compareCycle.name.split(' ')[1]})`} stroke="#64748b" strokeDasharray="4 4" strokeWidth={2} dot={false} />
+              <Line
+                type="monotone"
+                dataKey="compareMortality"
+                name={`Previous (${compareCycle.name.split('(')[0].trim()}) Dead`}
+                stroke="#64748b"
+                strokeDasharray="5 4"
+                strokeWidth={2.4}
+                dot={false}
+              />
             )}
+            {!compareCycle && selectedHouses.length === 1 && (
+              <Line type="monotone" dataKey="singleMortalities" name="Dead (Mortalities)" stroke="#dc2626" strokeWidth={2.5} dot={false} />
+            )}
+            {!compareCycle && selectedHouses.length === 1 && (
+              <Line type="monotone" dataKey="singleCulls" name="Sick (Culls)" stroke="#d97706" strokeWidth={2} dot={false} />
+            )}
+            {!compareCycle &&
+              selectedHouses.length > 1 &&
+              selectedHouses.map((h) => (
+                <Line key={h.id} type="monotone" dataKey={`mort_${h.id}`} name={`${h.name} Dead`} stroke={h.color} strokeWidth={2.3} dot={false} />
+              ))}
           </LineChart>
         </ResponsiveContainer>
       );
@@ -747,16 +945,16 @@ export default function Analytics() {
             <YAxis tick={{ fontSize: 11 }} />
             <Tooltip />
             <Legend />
-            {selectedHouses.length === 1 ? (
-              <>
-                <Area type="monotone" dataKey="singleMortalities" name="Dead (Mortalities)" stroke="#dc2626" fill="#dc2626" fillOpacity={0.2} strokeWidth={2} />
-                <Area type="monotone" dataKey="singleCulls" name="Sick (Culls)" stroke="#d97706" fill="#d97706" fillOpacity={0.2} strokeWidth={2} />
-              </>
-            ) : (
+            {selectedHouses.length === 1 && (
+              <Area type="monotone" dataKey="singleMortalities" name="Dead (Mortalities)" stroke="#dc2626" fill="#dc2626" fillOpacity={0.2} strokeWidth={2} />
+            )}
+            {selectedHouses.length === 1 && (
+              <Area type="monotone" dataKey="singleCulls" name="Sick (Culls)" stroke="#d97706" fill="#d97706" fillOpacity={0.2} strokeWidth={2} />
+            )}
+            {selectedHouses.length > 1 &&
               selectedHouses.map((h) => (
                 <Area key={h.id} type="monotone" dataKey={`mort_${h.id}`} name={`${h.name} Dead`} stroke={h.color} fill={h.color} fillOpacity={0.14} strokeWidth={2} />
-              ))
-            )}
+              ))}
           </AreaChart>
         </ResponsiveContainer>
       );
@@ -815,9 +1013,16 @@ export default function Analytics() {
             <Tooltip />
             <Legend />
             <ReferenceArea y1={targetMin} y2={targetMax} fill="#16a34a" fillOpacity={0.16} />
-            {selectedHouses.map((h) => (
-              <Bar key={h.id} dataKey={`weight_${h.id}`} name={`${h.name} (g)`} fill={h.color} radius={[4, 4, 0, 0]} />
-            ))}
+            {compareCycle && (
+              <Bar dataKey="avgWeightGrams" name="Current Cycle (g)" fill="#059669" radius={[4, 4, 0, 0]} />
+            )}
+            {compareCycle && (
+              <Bar dataKey="compareWeightGrams" name={`Previous (${compareCycle.name.split('(')[0].trim()}) (g)`} fill="#64748b" radius={[4, 4, 0, 0]} />
+            )}
+            {!compareCycle &&
+              selectedHouses.map((h) => (
+                <Bar key={h.id} dataKey={`weight_${h.id}`} name={`${h.name} (g)`} fill={h.color} radius={[4, 4, 0, 0]} />
+              ))}
           </BarChart>
         </ResponsiveContainer>
       );
@@ -850,29 +1055,42 @@ export default function Analytics() {
             stroke="#d97706"
             strokeWidth={2}
           />
-          {selectedHouses.map((h) => (
+          {compareCycle && (
             <Line
-              key={h.id}
               yAxisId="weight"
               type="monotone"
-              dataKey={`weight_${h.id}`}
-              name={`${h.name} Weight (g)`}
-              stroke={h.color}
-              strokeWidth={2.8}
+              dataKey="avgWeightGrams"
+              name={`Current (${activeCycle?.name?.split('(')[0]?.trim() || 'Current'}) (g)`}
+              stroke="#059669"
+              strokeWidth={3}
               dot={{ r: 4 }}
             />
-          ))}
+          )}
           {compareCycle && (
             <Line
               yAxisId="weight"
               type="monotone"
               dataKey="compareWeightGrams"
-              name="Compare Cycle (g)"
-              stroke="#64748b"
-              strokeDasharray="4 4"
-              strokeWidth={2}
+              name={`Previous (${compareCycle.name.split('(')[0].trim()}) (g)`}
+              stroke="#94a3b8"
+              strokeDasharray="5 4"
+              strokeWidth={2.5}
+              dot={{ r: 3 }}
             />
           )}
+          {!compareCycle &&
+            selectedHouses.map((h) => (
+              <Line
+                key={h.id}
+                yAxisId="weight"
+                type="monotone"
+                dataKey={`weight_${h.id}`}
+                name={`${h.name} Weight (g)`}
+                stroke={h.color}
+                strokeWidth={2.8}
+                dot={{ r: 4 }}
+              />
+            ))}
         </ComposedChart>
       </ResponsiveContainer>
     );
@@ -937,75 +1155,160 @@ export default function Analytics() {
           </div>
         </div>
 
-        {/* Multi-House Checkbox Overlay Filter + Chart Style Toggle */}
-        <div className="flex flex-col justify-between gap-4 border-t border-slate-100 pt-4 xl:flex-row xl:items-center">
-          <div className="space-y-2">
+        {/* Multi-House Searchable Dropdown Overlay Filter + Chart Style Toggle */}
+        <div className="flex flex-col justify-between gap-4 border-t border-slate-100 pt-4 xl:flex-row xl:items-center dark:border-slate-700">
+          <div className="relative space-y-2">
             <div className="flex flex-wrap items-center gap-2">
-              <span className="flex items-center gap-1 text-[11px] font-extrabold text-slate-600 uppercase">
-                <CheckSquare className="h-3.5 w-3.5 text-emerald-700" />
-                Multi-House Overlay ({selectedHouses.length} Checked):
+              <span className="flex items-center gap-1 text-[11px] font-extrabold text-slate-600 uppercase dark:text-slate-300">
+                <CheckSquare className="h-3.5 w-3.5 text-emerald-700 dark:text-emerald-400" />
+                House Scope:
               </span>
+
+              <button
+                type="button"
+                onClick={() => setIsHouseDropdownOpen((v) => !v)}
+                className="inline-flex items-center gap-2 rounded-2xl border border-emerald-300 bg-emerald-50/90 px-3.5 py-2 text-xs font-extrabold text-emerald-950 shadow-xs transition hover:bg-emerald-100 dark:border-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-200"
+              >
+                <span>
+                  {selectedHouses.length === 0
+                    ? 'Select Houses...'
+                    : selectedHouses.length <= 2
+                    ? selectedHouses.map((h) => h.name).join(', ')
+                    : `${selectedHouses.length} of ${allOverlayHouses.length} Houses Selected`}
+                </span>
+                <ChevronDown
+                  className={`h-4 w-4 transition-transform ${
+                    isHouseDropdownOpen ? 'rotate-180' : ''
+                  }`}
+                />
+              </button>
+
               <button
                 type="button"
                 onClick={handleSelectAllActive}
-                className="rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-0.5 text-[11px] font-extrabold text-emerald-900 hover:bg-emerald-100"
+                className="rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[11px] font-extrabold text-emerald-900 hover:bg-emerald-100 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300"
               >
                 Select All Active
               </button>
               <button
                 type="button"
                 onClick={handleSelectSameDayPlaced}
-                className="rounded-full border border-sky-200 bg-sky-50 px-2.5 py-0.5 text-[11px] font-extrabold text-sky-900 hover:bg-sky-100"
+                className="rounded-full border border-sky-200 bg-sky-50 px-2.5 py-1 text-[11px] font-extrabold text-sky-900 hover:bg-sky-100 dark:border-sky-800 dark:bg-sky-950/40 dark:text-sky-300"
               >
-                Same-Day Placed (H1 &amp; H5)
+                Same-Day (H1 &amp; H5)
               </button>
               <button
                 type="button"
                 onClick={handleClearHouses}
-                className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-0.5 text-[11px] font-bold text-slate-600 hover:bg-slate-100"
+                className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-bold text-slate-600 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300"
               >
                 Clear
               </button>
             </div>
 
-            <div className="flex flex-wrap gap-2">
-              {allOverlayHouses.map((h, idx) => {
-                const checked = selectedHouseIds.includes(h.id);
-                const swatch = HOUSE_PALETTE[idx % HOUSE_PALETTE.length];
-                return (
-                  <label
+            {/* Selected swatches preview (compact tags without crowding the toolbar) */}
+            {selectedHouses.length > 0 && (
+              <div className="flex flex-wrap gap-1.5">
+                {selectedHouses.map((h) => (
+                  <span
                     key={h.id}
-                    className={`flex cursor-pointer items-center gap-2 rounded-2xl border px-3 py-1.5 text-xs font-bold transition ${
-                      checked
-                        ? 'border-emerald-700 bg-emerald-50 text-emerald-950 shadow-xs'
-                        : 'border-slate-200 bg-slate-50 text-slate-600 hover:bg-slate-100'
-                    }`}
+                    className="inline-flex items-center gap-1.5 rounded-full border border-slate-200 bg-white px-2.5 py-0.5 text-[11px] font-bold text-slate-700 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
                   >
-                    <input
-                      type="checkbox"
-                      checked={checked}
-                      onChange={() => toggleHouseSelection(h.id)}
-                      className="h-3.5 w-3.5 accent-emerald-800"
-                    />
                     <span
-                      className="h-2.5 w-2.5 rounded-full shrink-0"
-                      style={{ backgroundColor: swatch }}
+                      className="h-2 w-2 rounded-full"
+                      style={{ backgroundColor: h.color }}
                     />
-                    <span>{h.name}</span>
-                    {h.isActive === false && (
-                      <span className="rounded bg-slate-200 px-1.5 py-0.5 text-[10px] font-extrabold text-slate-700">
-                        Inactive
-                      </span>
-                    )}
-                    {h.isActive !== false && h.phase === 'cleaning' && (
-                      <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-extrabold text-amber-900">
-                        Cleaning
-                      </span>
-                    )}
-                  </label>
-                );
-              })}
-            </div>
+                    {h.name}
+                    <button
+                      type="button"
+                      onClick={() => toggleHouseSelection(h.id)}
+                      aria-label={`Remove ${h.name}`}
+                      className="text-slate-400 hover:text-slate-700 dark:hover:text-white"
+                    >
+                      <X className="h-3 w-3" />
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
+
+            {/* Scalable Searchable Dropdown Menu */}
+            {isHouseDropdownOpen && (
+              <div className="absolute top-11 left-0 z-30 w-80 max-w-[90vw] rounded-2xl border border-slate-200 bg-white p-3 shadow-xl dark:border-slate-700 dark:bg-slate-900">
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <div className="relative flex-1">
+                    <Search className="pointer-events-none absolute top-2 left-2.5 h-3.5 w-3.5 text-slate-400" />
+                    <input
+                      type="text"
+                      value={houseDropdownSearch}
+                      onChange={(e) => setHouseDropdownSearch(e.target.value)}
+                      placeholder="Search house name or code..."
+                      className="w-full rounded-xl border border-slate-200 bg-slate-50 py-1.5 pr-2.5 pl-8 text-xs font-semibold dark:border-slate-700 dark:bg-slate-800 dark:text-white"
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setIsHouseDropdownOpen(false)}
+                    className="rounded-xl bg-emerald-800 px-3 py-1.5 text-[11px] font-extrabold text-white"
+                  >
+                    Done
+                  </button>
+                </div>
+
+                <div className="max-h-56 space-y-1 overflow-y-auto pr-1">
+                  {allOverlayHouses
+                    .filter((h) => {
+                      const q = houseDropdownSearch.trim().toLowerCase();
+                      if (!q) return true;
+                      return (
+                        h.name.toLowerCase().includes(q) ||
+                        String(h.code || '').toLowerCase().includes(q)
+                      );
+                    })
+                    .map((h, idx) => {
+                      const checked = selectedHouseIds.includes(h.id);
+                      const swatch = HOUSE_PALETTE[idx % HOUSE_PALETTE.length];
+                      return (
+                        <label
+                          key={h.id}
+                          className={`flex cursor-pointer items-center justify-between gap-2 rounded-xl px-2.5 py-2 text-xs font-bold transition ${
+                            checked
+                              ? 'bg-emerald-50 text-emerald-950 dark:bg-emerald-950/50 dark:text-emerald-200'
+                              : 'text-slate-700 hover:bg-slate-50 dark:text-slate-300 dark:hover:bg-slate-800'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2">
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={() => toggleHouseSelection(h.id)}
+                              className="h-4 w-4 accent-emerald-800"
+                            />
+                            <span
+                              className="h-2.5 w-2.5 shrink-0 rounded-full"
+                              style={{ backgroundColor: swatch }}
+                            />
+                            <span>{h.name}</span>
+                          </div>
+                          {h.isActive === false ? (
+                            <span className="rounded bg-slate-200 px-1.5 py-0.5 text-[10px] font-extrabold text-slate-700 dark:bg-slate-700 dark:text-slate-300">
+                              Inactive
+                            </span>
+                          ) : h.phase === 'cleaning' ? (
+                            <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-extrabold text-amber-900">
+                              Cleaning
+                            </span>
+                          ) : (
+                            <span className="rounded bg-emerald-100 px-1.5 py-0.5 text-[10px] font-extrabold text-emerald-800 dark:bg-emerald-900/50 dark:text-emerald-300">
+                              Active
+                            </span>
+                          )}
+                        </label>
+                      );
+                    })}
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Chart Style Pills */}
@@ -1059,7 +1362,7 @@ export default function Analytics() {
 
           {/* EXCLUSIVE TO SUPER ADMIN (FARM OWNER) */}
           {isOwner && (
-            <div className="rounded-3xl border border-emerald-300 bg-emerald-50/95 p-4 shadow-sm">
+            <div className="rounded-3xl border border-emerald-300 bg-emerald-50/95 p-4 shadow-sm dark:border-emerald-800 dark:bg-emerald-950/55">
               <div className="flex items-center justify-between">
                 <p className="text-[11px] font-extrabold text-emerald-900 uppercase">
                   Cycle Est. Profit (Owner)
@@ -1088,7 +1391,7 @@ export default function Analytics() {
             </p>
           </div>
 
-          <div className="rounded-3xl border border-amber-200 bg-amber-50/90 p-4 shadow-sm">
+          <div className="rounded-3xl border border-amber-200 bg-amber-50/90 p-4 shadow-sm dark:border-amber-800 dark:bg-amber-950/55">
             <div className="flex items-center justify-between">
               <p className="text-[11px] font-extrabold text-amber-900 uppercase">Avg Sick / Culls</p>
               <FileText className="h-4 w-4 text-amber-700" />
@@ -1101,7 +1404,7 @@ export default function Analytics() {
             </p>
           </div>
 
-          <div className="rounded-3xl border border-sky-200 bg-sky-50/90 p-4 shadow-sm">
+          <div className="rounded-3xl border border-sky-200 bg-sky-50/90 p-4 shadow-sm dark:border-sky-800 dark:bg-sky-950/55">
             <div className="flex items-center justify-between">
               <p className="text-[11px] font-extrabold text-sky-900 uppercase">FCR &amp; Catch Weight</p>
               <Scale className="h-4 w-4 text-sky-700" />
@@ -1151,7 +1454,7 @@ export default function Analytics() {
                   Ventilation efficiency: CO₂ alert threshold 3,000 ppm vs. static tunnel pressure (18–38 Pa)
                 </p>
               </div>
-              <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-3 py-1 text-xs font-bold text-emerald-900">
+              <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-3 py-1 text-xs font-bold text-emerald-900 dark:bg-emerald-950/60 dark:text-emerald-200">
                 <Gauge className="h-3.5 w-3.5" />
                 Target: 18–38 Pa
               </span>
@@ -1159,6 +1462,26 @@ export default function Analytics() {
             <div className="h-80 w-full">{renderAirQualityChart(effectiveAirMode)}</div>
           </section>
         </div>
+
+        {/* Dedicated Relative Humidity (%) Trend Chart */}
+        <section className="rounded-3xl border border-slate-200 bg-white/95 p-5 shadow-sm dark:border-slate-700 dark:bg-slate-800/95">
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+            <div>
+              <h3 className="flex items-center gap-2 text-base font-extrabold text-slate-900 dark:text-white">
+                <Droplets className="h-4 w-4 text-sky-600" />
+                Relative Humidity (%) Trend vs. Optimal 50–65% RH
+              </h3>
+              <p className="text-xs text-slate-500 dark:text-slate-400">
+                Evaporative cooling pad humidity tracking across the 35-day cycle
+                {compareCycle ? ` vs. ${compareCycle.name}` : ''}
+              </p>
+            </div>
+            <span className="inline-flex items-center gap-1 rounded-full bg-sky-50 px-3 py-1 text-xs font-bold text-sky-900 dark:bg-sky-950/60 dark:text-sky-200">
+              Target Band: 50%–65% RH
+            </span>
+          </div>
+          <div className="h-72 w-full">{renderHumidityChart(effectiveHumidityMode)}</div>
+        </section>
 
         {/* Chart Pair 2: Daily Mortality/Culls & Weekly Weight vs 1350-1550g Contract Target */}
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
