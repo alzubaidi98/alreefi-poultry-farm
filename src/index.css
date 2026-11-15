@@ -1,0 +1,305 @@
+@import "tailwindcss";
+@custom-variant dark (&:where(.dark, .dark *));
+
+@layer base {
+  html {
+    font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  body {
+    background-color: #f4f7f2;
+    color: #0f172a;
+    transition: background-color 0.2s ease, color 0.2s ease;
+  }
+
+  html.dark body {
+    background-color: #0f172a;
+    color: #f8fafc;
+  }
+}
+
+.app-bg-pattern {
+  background-color: #f4f7f2;
+  background-image: url('/tablet-bg.png');
+  background-size: cover;
+  background-position: center;
+  background-attachment: fixed;
+}
+
+html.dark .app-bg-pattern {
+  background-color: #0f172a;
+  background-image: linear-gradient(rgba(15, 23, 42, 0.9), rgba(15, 23, 42, 0.94)), url('/tablet-bg.png');
+  background-size: cover;
+  background-position: center;
+  background-attachment: fixed;
+}
+
+.carousel-scroll::-webkit-scrollbar {
+  height: 6px;
+}
+
+.carousel-scroll::-webkit-scrollbar-track {
+  background: rgba(15, 23, 42, 0.06);
+  border-radius: 9999px;
+}
+
+html.dark .carousel-scroll::-webkit-scrollbar-track {
+  background: rgba(148, 163, 184, 0.14);
+}
+
+.carousel-scroll::-webkit-scrollbar-thumb {
+  background: rgba(22, 101, 52, 0.35);
+  border-radius: 9999px;
+}
+
+html.dark .carousel-scroll::-webkit-scrollbar-thumb {
+  background: rgba(16, 185, 129, 0.45);
+}
+
+.carousel-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(22, 101, 52, 0.55);
+}
+
+/* ============================================================================
+   Global Dark Mode Surface, Typography, Border, Form & Recharts Compatibility
+   Ensures every component (including EmergencyModal & CropDashboard) renders
+   cleanly in crisp dark slate when `.dark` is toggled on `document.documentElement`.
+   ============================================================================ */
+
+html.dark .bg-white:not([class*="dark:bg-"]) {
+  background-color: #1e293b;
+}
+
+html.dark .bg-white\/95:not([class*="dark:bg-"]) {
+  background-color: rgba(30, 41, 59, 0.95);
+}
+
+html.dark .bg-white\/92:not([class*="dark:bg-"]) {
+  background-color: rgba(30, 41, 59, 0.92);
+}
+
+html.dark .bg-white\/90:not([class*="dark:bg-"]) {
+  background-color: rgba(30, 41, 59, 0.9);
+}
+
+html.dark .bg-white\/80:not([class*="dark:bg-"]) {
+  background-color: rgba(30, 41, 59, 0.8);
+}
+
+html.dark .bg-slate-50:not([class*="dark:bg-"]) {
+  background-color: #0b1220;
+}
+
+html.dark .bg-slate-50\/90:not([class*="dark:bg-"]) {
+  background-color: rgba(11, 18, 32, 0.9);
+}
+
+html.dark .bg-slate-50\/80:not([class*="dark:bg-"]) {
+  background-color: rgba(11, 18, 32, 0.8);
+}
+
+html.dark .bg-slate-100:not([class*="dark:bg-"]) {
+  background-color: #162033;
+}
+
+html.dark .bg-slate-200:not([class*="dark:bg-"]) {
+  background-color: #273549;
+}
+
+html.dark .hover\:bg-slate-50:hover:not([class*="dark:hover:bg-"]) {
+  background-color: #162033;
+}
+
+html.dark .hover\:bg-slate-100:hover:not([class*="dark:hover:bg-"]) {
+  background-color: #273549;
+}
+
+/* Soft tinted light-mode badges & callout boxes in Dark Mode */
+html.dark .bg-emerald-50:not([class*="dark:bg-"]),
+html.dark .bg-emerald-50\/80:not([class*="dark:bg-"]),
+html.dark .bg-emerald-50\/70:not([class*="dark:bg-"]) {
+  background-color: rgba(6, 78, 59, 0.35);
+}
+
+html.dark .bg-emerald-100:not([class*="dark:bg-"]) {
+  background-color: rgba(6, 95, 70, 0.45);
+}
+
+html.dark .bg-amber-50:not([class*="dark:bg-"]),
+html.dark .bg-amber-50\/80:not([class*="dark:bg-"]) {
+  background-color: rgba(120, 53, 15, 0.35);
+}
+
+html.dark .bg-amber-100:not([class*="dark:bg-"]) {
+  background-color: rgba(146, 64, 14, 0.45);
+}
+
+html.dark .bg-red-50:not([class*="dark:bg-"]),
+html.dark .bg-red-50\/80:not([class*="dark:bg-"]) {
+  background-color: rgba(127, 29, 29, 0.35);
+}
+
+html.dark .bg-red-100:not([class*="dark:bg-"]) {
+  background-color: rgba(153, 27, 27, 0.45);
+}
+
+html.dark .bg-sky-50:not([class*="dark:bg-"]),
+html.dark .bg-blue-50:not([class*="dark:bg-"]) {
+  background-color: rgba(12, 74, 110, 0.35);
+}
+
+html.dark .bg-sky-100:not([class*="dark:bg-"]),
+html.dark .bg-blue-100:not([class*="dark:bg-"]) {
+  background-color: rgba(7, 89, 133, 0.45);
+}
+
+html.dark .bg-indigo-50:not([class*="dark:bg-"]),
+html.dark .bg-purple-50:not([class*="dark:bg-"]) {
+  background-color: rgba(49, 46, 129, 0.35);
+}
+
+html.dark .bg-indigo-100:not([class*="dark:bg-"]),
+html.dark .bg-purple-100:not([class*="dark:bg-"]) {
+  background-color: rgba(55, 48, 163, 0.45);
+}
+
+/* Text Colors */
+html.dark .text-slate-900:not([class*="dark:text-"]) {
+  color: #f8fafc;
+}
+
+html.dark .text-slate-800:not([class*="dark:text-"]) {
+  color: #e2e8f0;
+}
+
+html.dark .text-slate-700:not([class*="dark:text-"]) {
+  color: #cbd5e1;
+}
+
+html.dark .text-slate-600:not([class*="dark:text-"]) {
+  color: #94a3b8;
+}
+
+html.dark .text-slate-500:not([class*="dark:text-"]) {
+  color: #94a3b8;
+}
+
+html.dark .text-emerald-950:not([class*="dark:text-"]),
+html.dark .text-emerald-900:not([class*="dark:text-"]) {
+  color: #a7f3d0;
+}
+
+html.dark .text-emerald-800:not([class*="dark:text-"]),
+html.dark .text-emerald-700:not([class*="dark:text-"]) {
+  color: #6ee7b7;
+}
+
+html.dark .text-amber-950:not([class*="dark:text-"]),
+html.dark .text-amber-900:not([class*="dark:text-"]),
+html.dark .text-amber-800:not([class*="dark:text-"]) {
+  color: #fcd34d;
+}
+
+html.dark .text-red-900:not([class*="dark:text-"]),
+html.dark .text-red-800:not([class*="dark:text-"]),
+html.dark .text-red-700:not([class*="dark:text-"]) {
+  color: #fca5a5;
+}
+
+html.dark .text-sky-900:not([class*="dark:text-"]),
+html.dark .text-sky-800:not([class*="dark:text-"]),
+html.dark .text-blue-900:not([class*="dark:text-"]),
+html.dark .text-blue-800:not([class*="dark:text-"]) {
+  color: #7dd3fc;
+}
+
+html.dark .text-indigo-900:not([class*="dark:text-"]),
+html.dark .text-purple-900:not([class*="dark:text-"]) {
+  color: #c4b5fd;
+}
+
+/* Borders */
+html.dark .border-slate-100:not([class*="dark:border-"]) {
+  border-color: #1e293b;
+}
+
+html.dark .border-slate-200:not([class*="dark:border-"]) {
+  border-color: #334155;
+}
+
+html.dark .border-slate-300:not([class*="dark:border-"]) {
+  border-color: #475569;
+}
+
+html.dark .border-emerald-100:not([class*="dark:border-"]),
+html.dark .border-emerald-200:not([class*="dark:border-"]),
+html.dark .border-emerald-900\/10:not([class*="dark:border-"]),
+html.dark .border-emerald-950\/10:not([class*="dark:border-"]) {
+  border-color: #1e3a34;
+}
+
+html.dark .border-amber-200:not([class*="dark:border-"]),
+html.dark .border-amber-300:not([class*="dark:border-"]) {
+  border-color: #78350f;
+}
+
+html.dark .border-red-200:not([class*="dark:border-"]),
+html.dark .border-red-300:not([class*="dark:border-"]) {
+  border-color: #7f1d1d;
+}
+
+html.dark .border-sky-200:not([class*="dark:border-"]),
+html.dark .border-blue-200:not([class*="dark:border-"]) {
+  border-color: #075985;
+}
+
+/* Form Controls */
+html.dark input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]):not([class*="dark:bg-"]),
+html.dark select:not([class*="dark:bg-"]),
+html.dark textarea:not([class*="dark:bg-"]) {
+  background-color: #0b1220;
+  color: #f8fafc;
+  border-color: #334155;
+}
+
+html.dark input::placeholder,
+html.dark textarea::placeholder {
+  color: #64748b;
+}
+
+html.dark input:focus,
+html.dark select:focus,
+html.dark textarea:focus {
+  border-color: #10b981;
+}
+
+/* Recharts Dark Mode Readability */
+html.dark .recharts-cartesian-axis-tick-value,
+html.dark .recharts-text,
+html.dark .recharts-legend-item-text {
+  fill: #cbd5e1 !important;
+  color: #cbd5e1 !important;
+}
+
+html.dark .recharts-cartesian-grid line {
+  stroke: #334155 !important;
+}
+
+html.dark .recharts-default-tooltip {
+  background-color: #0f172a !important;
+  border: 1px solid #334155 !important;
+  color: #f8fafc !important;
+  border-radius: 0.75rem !important;
+}
+
+html.dark .recharts-tooltip-label,
+html.dark .recharts-tooltip-item {
+  color: #f8fafc !important;
+}
+
+@media print {
+  .no-print {
+    display: none !important;
+  }
+}
