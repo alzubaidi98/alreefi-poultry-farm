@@ -1,15 +1,17 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle,
   Camera,
   CheckCircle2,
   ChevronDown,
   ChevronUp,
+  ClipboardCheck,
   Clock,
   Droplets,
   Edit3,
   Eye,
   HeartPulse,
+  History,
   Lock,
   Minus,
   Package,
@@ -18,20 +20,21 @@ import {
   Save,
   ShieldCheck,
   Skull,
+  Sparkles,
   Thermometer,
   Truck,
+  Unlock,
   Wheat,
+  Wind,
   X,
 } from 'lucide-react';
 import {
   calculateHouseInventory,
-  gallonsToLiters,
-  litersToGallons,
-} from '../mockData.js';
-import { History } from 'lucide-react';
-import {
   detectActiveShiftForTimestamp,
+  evaluateHouseEnvironmentStatus,
+  gallonsToLiters,
   getTasksForHouseAndShift,
+  litersToGallons,
 } from '../mockData.js';
 import { compressImageFile } from '../services/storageService.js';
 import { useFarm } from '../App.jsx';
@@ -44,6 +47,685 @@ const ANOMALY_CATEGORIES = [
   'Sick Flock Observation',
 ];
 
+function BroilerHouseSvgIcon({ className = 'h-12 w-12', isSilo = false, status = 'OPTIMAL' }) {
+  const accentColor =
+    status === 'INACTIVE'
+      ? '#64748b'
+      : status === 'CLEANING'
+      ? '#0284c7'
+      : status === 'ALERT'
+      ? '#dc2626'
+      : status === 'ATTENTION'
+      ? '#d97706'
+      : '#059669';
+
+  return (
+    <svg
+      viewBox="0 0 64 64"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      className={className}
+      aria-hidden="true"
+    >
+      {/* Concrete pad */}
+      <rect x="4" y="54" width="56" height="4" rx="2" fill="currentColor" opacity="0.22" />
+
+      {/* Feed silo silhouette (emphasized on silo-equipped houses) */}
+      <g opacity={isSilo ? 1 : 0.3}>
+        <path d="M49 20 L54 13 L59 20 Z" fill={isSilo ? '#4f46e5' : 'currentColor'} />
+        <rect
+          x="49"
+          y="20"
+          width="10"
+          height="21"
+          rx="1.5"
+          fill={isSilo ? '#6366f1' : 'currentColor'}
+          opacity={isSilo ? 0.9 : 0.55}
+        />
+        <path d="M49 41 L54 48 L59 41 Z" fill={isSilo ? '#4338ca' : 'currentColor'} />
+        <line x1="50" y1="44" x2="50" y2="54" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+        <line x1="58" y1="44" x2="58" y2="54" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+        <path d="M51 46 L44 36" stroke={isSilo ? '#4338ca' : 'currentColor'} strokeWidth="2.2" strokeLinecap="round" />
+      </g>
+
+      {/* Ridge vent / cupola */}
+      <rect x="21" y="9" width="12" height="5" rx="1.5" fill={accentColor} />
+      <path d="M19 10 L27 5 L35 10 Z" fill={accentColor} />
+      <line x1="23.5" y1="11.5" x2="30.5" y2="11.5" stroke="#ffffff" strokeWidth="1.4" strokeLinecap="round" />
+
+      {/* Barn frame */}
+      <path
+        d="M9 28 L27 14 L45 28 V54 H9 V28 Z"
+        fill="currentColor"
+        fillOpacity="0.1"
+        stroke="currentColor"
+        strokeWidth="2.4"
+        strokeLinejoin="round"
+      />
+
+      {/* Pitched roof overhang */}
+      <path
+        d="M5 29 L27 12 L49 29"
+        stroke={accentColor}
+        strokeWidth="3.2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+
+      {/* Side wall evaporative louvers */}
+      <rect
+        x="13"
+        y="34"
+        width="10"
+        height="10"
+        rx="1.8"
+        fill="currentColor"
+        fillOpacity="0.15"
+        stroke="currentColor"
+        strokeWidth="1.5"
+      />
+      <line x1="15" y1="37" x2="21" y2="37" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+      <line x1="15" y1="39.5" x2="21" y2="39.5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+      <line x1="15" y1="42" x2="21" y2="42" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+
+      {/* Circular exhaust fan with blades */}
+      <circle
+        cx="34"
+        cy="39"
+        r="6.5"
+        fill={accentColor}
+        fillOpacity="0.14"
+        stroke={accentColor}
+        strokeWidth="2"
+      />
+      <circle cx="34" cy="39" r="1.6" fill={accentColor} />
+      <path
+        d="M34 34.2 L35.4 37.5 M38.2 41.4 L35.2 39.8 M29.8 41.4 L32.8 39.8"
+        stroke={accentColor}
+        strokeWidth="1.6"
+        strokeLinecap="round"
+      />
+
+      {/* Barn access doors */}
+      <rect
+        x="21"
+        y="46"
+        width="12"
+        height="8"
+        rx="1"
+        fill={accentColor}
+        fillOpacity="0.22"
+        stroke="currentColor"
+        strokeWidth="1.5"
+      />
+      <line x1="27" y1="46" x2="27" y2="54" stroke="currentColor" strokeWidth="1.3" />
+    </svg>
+  );
+}
+
+function getHouseStatusBadgeMeta(status) {
+  if (status === 'INACTIVE') {
+    return {
+      label: 'INACTIVE',
+      badgeClass: 'bg-slate-700 text-white',
+      iconWrapClass: 'bg-slate-200 text-slate-700 dark:bg-slate-800 dark:text-slate-300',
+    };
+  }
+  if (status === 'CLEANING') {
+    return {
+      label: 'CLEANING',
+      badgeClass: 'bg-sky-700 text-white',
+      iconWrapClass: 'bg-sky-100 text-sky-900 dark:bg-sky-900/50 dark:text-sky-200',
+    };
+  }
+  if (status === 'ALERT') {
+    return {
+      label: 'ALERT',
+      badgeClass: 'bg-red-600 text-white',
+      iconWrapClass: 'bg-red-100 text-red-800 dark:bg-red-950/70 dark:text-red-200',
+    };
+  }
+  if (status === 'ATTENTION') {
+    return {
+      label: 'ATTENTION',
+      badgeClass: 'bg-amber-500 text-white',
+      iconWrapClass: 'bg-amber-100 text-amber-900 dark:bg-amber-950/70 dark:text-amber-200',
+    };
+  }
+  return {
+    label: 'OPTIMAL',
+    badgeClass: 'bg-emerald-600 text-white',
+    iconWrapClass: 'bg-emerald-100 text-emerald-900 dark:bg-emerald-950/70 dark:text-emerald-200',
+  };
+}
+
+function BroilerHouseSelectionGrid({
+  houses,
+  selectedHouseId,
+  onSelectHouse,
+  healthLogs,
+  chicksPerCarton,
+  settings,
+}) {
+  return (
+    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
+      {houses.map((h) => {
+        const selected = h.id === selectedHouseId;
+        const isSilo = h.feedSystemType === 'silo';
+        const bagKg = Number(h.bagWeightKg || 50);
+        const siloTons = Number(h.siloCapacityTons || 20);
+        const envEval = evaluateHouseEnvironmentStatus(h, settings);
+        const inv = calculateHouseInventory(h, chicksPerCarton, healthLogs || []);
+        const avgTemp = (
+          (Number(h.zones?.start || 0) +
+            Number(h.zones?.middle || 0) +
+            Number(h.zones?.end || 0)) /
+          3
+        ).toFixed(1);
+        const statusMeta = getHouseStatusBadgeMeta(envEval.status);
+
+        return (
+          <button
+            key={h.id}
+            type="button"
+            onClick={() => onSelectHouse(h.id)}
+            aria-pressed={selected}
+            className={`group flex flex-col justify-between gap-3 rounded-2xl border-2 p-4 text-left transition ${
+              selected
+                ? 'border-emerald-700 bg-emerald-50/90 shadow-md ring-2 ring-emerald-500/25 dark:border-emerald-400 dark:bg-emerald-950/55 dark:ring-emerald-400/20'
+                : 'border-slate-200 bg-white/95 hover:border-emerald-400 hover:bg-emerald-50/35 dark:border-slate-700 dark:bg-slate-900/75 dark:hover:border-emerald-600 dark:hover:bg-slate-800/80'
+            }`}
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex min-w-0 items-center gap-3">
+                <div
+                  className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl p-1.5 shadow-xs ${statusMeta.iconWrapClass}`}
+                >
+                  <BroilerHouseSvgIcon
+                    className="h-10 w-10"
+                    isSilo={isSilo}
+                    status={envEval.status}
+                  />
+                </div>
+                <div className="min-w-0">
+                  <h3 className="truncate text-sm font-black text-slate-900 dark:text-white">
+                    {h.name}
+                  </h3>
+                  <p className="truncate text-xs font-semibold text-slate-600 dark:text-slate-300">
+                    {h.sector || 'Main Pad'} •{' '}
+                    {h.phase === 'cleaning'
+                      ? `Cleaning (${h.cleaningDay}/${h.targetCleaningDays || 14})`
+                      : `Day ${h.cycleDay}/${h.targetCycleDays || 35}`}
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex shrink-0 items-center gap-1.5">
+                {selected && (
+                  <span className="inline-flex h-6 w-6 items-center justify-center rounded-full bg-emerald-700 text-white shadow-xs dark:bg-emerald-500">
+                    <CheckCircle2 className="h-4 w-4" />
+                  </span>
+                )}
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-200/80 pt-2.5 dark:border-slate-700/80">
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span
+                  className={`rounded-full px-2.5 py-0.5 text-[10px] font-black tracking-wide uppercase ${statusMeta.badgeClass}`}
+                >
+                  {statusMeta.label}
+                </span>
+                <span
+                  className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-extrabold ${
+                    isSilo
+                      ? 'border-indigo-200 bg-indigo-50 text-indigo-800 dark:border-indigo-800 dark:bg-indigo-950/60 dark:text-indigo-200'
+                      : 'border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-800 dark:bg-amber-950/60 dark:text-amber-200'
+                  }`}
+                >
+                  {isSilo ? <Package className="h-3 w-3" /> : <Wheat className="h-3 w-3" />}
+                  {isSilo ? `${siloTons}T Silo` : `${bagKg}kg Bags`}
+                </span>
+              </div>
+
+              <div className="text-right text-xs font-extrabold tabular-nums text-slate-800 dark:text-slate-100">
+                {h.phase === 'cleaning' ? (
+                  <span className="text-sky-700 dark:text-sky-300">Sanitation</span>
+                ) : (
+                  <span>
+                    {inv.activeChicks.toLocaleString()} birds • {avgTemp}°C
+                  </span>
+                )}
+              </div>
+            </div>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function getFieldTaskVisualMeta(item) {
+  if (item.kind === 'med') {
+    return {
+      Icon: Pill,
+      badgeClass: 'bg-indigo-100 text-indigo-800 dark:bg-indigo-900/60 dark:text-indigo-200',
+    };
+  }
+  const cat = String(item.raw?.category || '').toLowerCase();
+  const code = String(item.raw?.taskCode || '').toUpperCase();
+  if (cat.includes('clean') || code.startsWith('C')) {
+    return {
+      Icon: Sparkles,
+      badgeClass: 'bg-sky-100 text-sky-800 dark:bg-sky-900/60 dark:text-sky-200',
+    };
+  }
+  if (cat.includes('water') || code.startsWith('W')) {
+    return {
+      Icon: Droplets,
+      badgeClass: 'bg-cyan-100 text-cyan-800 dark:bg-cyan-900/60 dark:text-cyan-200',
+    };
+  }
+  if (cat.includes('feed') || code.startsWith('F')) {
+    return {
+      Icon: Wheat,
+      badgeClass: 'bg-amber-100 text-amber-800 dark:bg-amber-900/60 dark:text-amber-200',
+    };
+  }
+  if (cat.includes('vent') || code.startsWith('V')) {
+    return {
+      Icon: Wind,
+      badgeClass: 'bg-teal-100 text-teal-800 dark:bg-teal-900/60 dark:text-teal-200',
+    };
+  }
+  if (cat.includes('bio') || code.startsWith('B')) {
+    return {
+      Icon: ShieldCheck,
+      badgeClass: 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/60 dark:text-emerald-200',
+    };
+  }
+  return {
+    Icon: ClipboardCheck,
+    badgeClass: 'bg-slate-200 text-slate-800 dark:bg-slate-800 dark:text-slate-200',
+  };
+}
+
+function DailyCountersStack({
+  isManagement,
+  isSiloHouse,
+  bagWeightKg,
+  mortalities,
+  setMortalities,
+  culls,
+  setCulls,
+  bagsConsumed,
+  setBagsConsumed,
+  feedPhase,
+  setFeedPhase,
+  feedKgComputed,
+  stockBagsRemaining,
+  showDeliveryForm,
+  setShowDeliveryForm,
+  waterGallonsInput,
+  setWaterGallonsInput,
+  waterViewUnit,
+  setWaterViewUnit,
+  displayedWaterValue,
+  handleWaterDisplayChange,
+  waterGallonsComputed,
+  waterLitersComputed,
+  waterM3Computed,
+  manualTempC,
+  setManualTempC,
+  shiftSubtotals,
+  currentShiftLogs,
+}) {
+  const latestTemp = currentShiftLogs[0]?.manualTempC;
+
+  return (
+    <div className="flex flex-col space-y-3.5">
+      {/* 1. Dead Birds */}
+      <div className="flex flex-col gap-3 rounded-2xl border-2 border-rose-200 bg-rose-50/75 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5 dark:border-rose-900/70 dark:bg-rose-950/30">
+        <div className="flex min-w-0 items-start gap-3.5 sm:items-center">
+          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-rose-100 text-rose-700 shadow-xs dark:bg-rose-900/60 dark:text-rose-200">
+            <Skull className="h-6 w-6" />
+          </div>
+          <div className="min-w-0 space-y-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <h3 className="text-base font-black text-slate-900 dark:text-white">Dead Birds</h3>
+              <span className="rounded-full bg-rose-100 px-2.5 py-0.5 text-[11px] font-extrabold text-rose-900 dark:bg-rose-900/60 dark:text-rose-200">
+                Today Logged: {shiftSubtotals.dead} dead
+              </span>
+            </div>
+            <p className="text-xs font-medium text-rose-900/80 dark:text-rose-200/80">
+              Mortality count for this shift entry
+            </p>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+          <button
+            type="button"
+            onClick={() => setMortalities((v) => Math.max(0, Number(v || 0) - 1))}
+            aria-label="Decrease Dead Birds count"
+            className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border-2 border-rose-300 bg-white text-rose-800 shadow-xs transition hover:bg-rose-100 active:scale-95 dark:border-rose-800 dark:bg-slate-900 dark:text-rose-300 dark:hover:bg-rose-950"
+          >
+            <Minus className="h-5 w-5" />
+          </button>
+          <input
+            type="number"
+            min="0"
+            value={mortalities}
+            onFocus={(e) => e.target.select()}
+            onChange={(e) => setMortalities(Math.max(0, Math.round(Number(e.target.value || 0))))}
+            aria-label="Dead Birds count"
+            className="h-12 w-24 min-w-[5.5rem] rounded-2xl border-2 border-rose-200 bg-white px-2 text-center text-2xl font-black text-slate-900 tabular-nums focus:border-rose-500 focus:outline-none dark:border-rose-800 dark:bg-slate-900 dark:text-white"
+          />
+          <button
+            type="button"
+            onClick={() => setMortalities((v) => Number(v || 0) + 1)}
+            aria-label="Increase Dead Birds count"
+            className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-rose-600 text-white shadow-xs transition hover:bg-rose-700 active:scale-95"
+          >
+            <Plus className="h-5 w-5" />
+          </button>
+        </div>
+      </div>
+
+      {/* 2. Sick / Culls */}
+      <div className="flex flex-col gap-3 rounded-2xl border-2 border-amber-200 bg-amber-50/75 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5 dark:border-amber-900/70 dark:bg-amber-950/30">
+        <div className="flex min-w-0 items-start gap-3.5 sm:items-center">
+          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-amber-100 text-amber-800 shadow-xs dark:bg-amber-900/60 dark:text-amber-200">
+            <HeartPulse className="h-6 w-6" />
+          </div>
+          <div className="min-w-0 space-y-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <h3 className="text-base font-black text-slate-900 dark:text-white">Sick / Culls</h3>
+              <span className="rounded-full bg-amber-100 px-2.5 py-0.5 text-[11px] font-extrabold text-amber-900 dark:bg-amber-900/60 dark:text-amber-200">
+                Today Logged: {shiftSubtotals.culls} culls
+              </span>
+            </div>
+            <p className="text-xs font-medium text-amber-900/80 dark:text-amber-200/80">
+              Weak, sick, or culled birds removed from flock
+            </p>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+          <button
+            type="button"
+            onClick={() => setCulls((v) => Math.max(0, Number(v || 0) - 1))}
+            aria-label="Decrease Sick / Culls count"
+            className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border-2 border-amber-300 bg-white text-amber-800 shadow-xs transition hover:bg-amber-100 active:scale-95 dark:border-amber-800 dark:bg-slate-900 dark:text-amber-300 dark:hover:bg-amber-950"
+          >
+            <Minus className="h-5 w-5" />
+          </button>
+          <input
+            type="number"
+            min="0"
+            value={culls}
+            onFocus={(e) => e.target.select()}
+            onChange={(e) => setCulls(Math.max(0, Math.round(Number(e.target.value || 0))))}
+            aria-label="Sick / Culls count"
+            className="h-12 w-24 min-w-[5.5rem] rounded-2xl border-2 border-amber-200 bg-white px-2 text-center text-2xl font-black text-slate-900 tabular-nums focus:border-amber-500 focus:outline-none dark:border-amber-800 dark:bg-slate-900 dark:text-white"
+          />
+          <button
+            type="button"
+            onClick={() => setCulls((v) => Number(v || 0) + 1)}
+            aria-label="Increase Sick / Culls count"
+            className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-amber-500 text-white shadow-xs transition hover:bg-amber-600 active:scale-95"
+          >
+            <Plus className="h-5 w-5" />
+          </button>
+        </div>
+      </div>
+
+      {/* 3. Feed Bags (STRICTLY HIDDEN when isSiloHouse is true) */}
+      {!isSiloHouse && (
+        <div className="flex flex-col gap-3 rounded-2xl border-2 border-emerald-200 bg-emerald-50/75 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5 dark:border-emerald-900/70 dark:bg-emerald-950/30">
+          <div className="flex min-w-0 items-start gap-3.5 sm:items-center">
+            <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-emerald-100 text-emerald-800 shadow-xs dark:bg-emerald-900/60 dark:text-emerald-200">
+              <Wheat className="h-6 w-6" />
+            </div>
+            <div className="min-w-0 space-y-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <h3 className="text-base font-black text-slate-900 dark:text-white">Feed Bags</h3>
+                <span className="rounded-full bg-emerald-100 px-2.5 py-0.5 text-[11px] font-extrabold text-emerald-900 dark:bg-emerald-900/60 dark:text-emerald-200">
+                  Today Logged: {shiftSubtotals.bags} bags ({shiftSubtotals.bags * bagWeightKg} kg)
+                </span>
+                {isManagement && (
+                  <select
+                    value={feedPhase}
+                    onChange={(e) => setFeedPhase(e.target.value)}
+                    aria-label="Feed phase"
+                    className="rounded-xl border border-emerald-300 bg-white px-2 py-0.5 text-[11px] font-extrabold text-slate-900 dark:border-emerald-700 dark:bg-slate-900 dark:text-white"
+                  >
+                    <option value="Starter">Starter</option>
+                    <option value="Grower">Grower</option>
+                    <option value="Finisher">Finisher</option>
+                  </select>
+                )}
+              </div>
+              <p className="text-xs font-medium text-emerald-900/80 dark:text-emerald-200/80">
+                {bagWeightKg} kg/bag • This entry: <strong>{feedKgComputed.toLocaleString()} kg</strong> •{' '}
+                {feedPhase} Stock: <strong>{stockBagsRemaining} bags</strong>
+              </p>
+              {isManagement && setShowDeliveryForm && (
+                <button
+                  type="button"
+                  onClick={() => setShowDeliveryForm(!showDeliveryForm)}
+                  className="mt-1 inline-flex items-center gap-1.5 rounded-xl border border-emerald-300 bg-white/90 px-2.5 py-1 text-[11px] font-extrabold text-emerald-900 hover:bg-emerald-100 dark:border-emerald-700 dark:bg-slate-900 dark:text-emerald-200"
+                >
+                  <Truck className="h-3.5 w-3.5" />
+                  + Log {bagWeightKg}kg Bag Delivery
+                </button>
+              )}
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+            <button
+              type="button"
+              onClick={() => setBagsConsumed((v) => Math.max(0, Number(v || 0) - 1))}
+              aria-label="Decrease Feed Bags"
+              className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border-2 border-emerald-300 bg-white text-emerald-800 shadow-xs transition hover:bg-emerald-100 active:scale-95 dark:border-emerald-800 dark:bg-slate-900 dark:text-emerald-300 dark:hover:bg-emerald-950"
+            >
+              <Minus className="h-5 w-5" />
+            </button>
+            <input
+              type="number"
+              min="0"
+              step="1"
+              value={bagsConsumed}
+              onFocus={(e) => e.target.select()}
+              onChange={(e) => setBagsConsumed(Math.max(0, Math.round(Number(e.target.value || 0))))}
+              aria-label="Feed Bags count"
+              className="h-12 w-24 min-w-[5.5rem] rounded-2xl border-2 border-emerald-200 bg-white px-2 text-center text-2xl font-black text-slate-900 tabular-nums focus:border-emerald-600 focus:outline-none dark:border-emerald-800 dark:bg-slate-900 dark:text-white"
+            />
+            <button
+              type="button"
+              onClick={() => setBagsConsumed((v) => Number(v || 0) + 1)}
+              aria-label="Increase Feed Bags"
+              className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-emerald-700 text-white shadow-xs transition hover:bg-emerald-800 active:scale-95"
+            >
+              <Plus className="h-5 w-5" />
+            </button>
+            <button
+              type="button"
+              onClick={() => setBagsConsumed((v) => Number(v || 0) + 5)}
+              aria-label="Add 5 Feed Bags"
+              className="h-12 shrink-0 rounded-2xl bg-emerald-900 px-3.5 text-xs font-black text-white shadow-xs transition hover:bg-emerald-950 active:scale-95 dark:bg-emerald-600 dark:hover:bg-emerald-700"
+            >
+              +5
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* 4. Water (Gallons) */}
+      <div className="flex flex-col gap-3 rounded-2xl border-2 border-sky-200 bg-sky-50/75 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5 dark:border-sky-900/70 dark:bg-sky-950/30">
+        <div className="flex min-w-0 items-start gap-3.5 sm:items-center">
+          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-sky-100 text-sky-800 shadow-xs dark:bg-sky-900/60 dark:text-sky-200">
+            <Droplets className="h-6 w-6" />
+          </div>
+          <div className="min-w-0 space-y-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <h3 className="text-base font-black text-slate-900 dark:text-white">
+                Water (Gallons)
+              </h3>
+              <span className="rounded-full bg-sky-700 px-2.5 py-0.5 text-[11px] font-black text-white uppercase">
+                Gallons
+              </span>
+              <span className="rounded-full bg-sky-100 px-2.5 py-0.5 text-[11px] font-extrabold text-sky-900 dark:bg-sky-900/60 dark:text-sky-200">
+                Today Logged: {shiftSubtotals.gallons.toLocaleString()} gal
+              </span>
+              {isManagement && (
+                <div className="inline-flex rounded-full border border-sky-200 bg-white p-0.5 text-[11px] font-bold dark:border-sky-800 dark:bg-slate-900">
+                  {[
+                    ['gallons', 'gal'],
+                    ['liters', 'L'],
+                    ['m3', 'm³'],
+                  ].map(([unitKey, label]) => (
+                    <button
+                      key={unitKey}
+                      type="button"
+                      onClick={() => setWaterViewUnit(unitKey)}
+                      className={`rounded-full px-2 py-0.5 ${
+                        waterViewUnit === unitKey
+                          ? 'bg-sky-700 text-white'
+                          : 'text-slate-600 dark:text-slate-300'
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+            <p className="text-xs font-medium text-sky-900/80 dark:text-sky-200/80">
+              Tank gauge in Gallons • <strong>{waterGallonsComputed.toLocaleString()} gal</strong> ={' '}
+              {waterLitersComputed.toLocaleString()} L ({waterM3Computed} m³)
+            </p>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+          <button
+            type="button"
+            onClick={() =>
+              setWaterGallonsInput((v) => Math.max(0, Math.round(Number(v || 0) - 100)))
+            }
+            aria-label="Decrease Water by 100 Gallons"
+            className="h-12 shrink-0 rounded-2xl border-2 border-sky-300 bg-white px-3 text-xs font-black text-sky-900 shadow-xs transition hover:bg-sky-100 active:scale-95 dark:border-sky-800 dark:bg-slate-900 dark:text-sky-200 dark:hover:bg-sky-950"
+          >
+            -100
+          </button>
+          <button
+            type="button"
+            onClick={() =>
+              setWaterGallonsInput((v) => Math.max(0, Math.round(Number(v || 0) - 25)))
+            }
+            aria-label="Decrease Water by 25 Gallons"
+            className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border-2 border-sky-300 bg-white text-sky-800 shadow-xs transition hover:bg-sky-100 active:scale-95 dark:border-sky-800 dark:bg-slate-900 dark:text-sky-300 dark:hover:bg-sky-950"
+            title="-25 gal"
+          >
+            <Minus className="h-5 w-5" />
+          </button>
+          <input
+            type="number"
+            min="0"
+            step={isManagement && waterViewUnit === 'm3' ? '0.1' : '1'}
+            value={isManagement ? displayedWaterValue : waterGallonsInput}
+            onFocus={(e) => e.target.select()}
+            onChange={(e) =>
+              isManagement
+                ? handleWaterDisplayChange(e.target.value)
+                : setWaterGallonsInput(Math.max(0, Math.round(Number(e.target.value || 0))))
+            }
+            aria-label="Water in Gallons"
+            className="h-12 w-24 min-w-[5.5rem] rounded-2xl border-2 border-sky-200 bg-white px-2 text-center text-2xl font-black text-slate-900 tabular-nums focus:border-sky-600 focus:outline-none dark:border-sky-800 dark:bg-slate-900 dark:text-white"
+          />
+          <button
+            type="button"
+            onClick={() => setWaterGallonsInput((v) => Math.round(Number(v || 0) + 25))}
+            aria-label="Increase Water by 25 Gallons"
+            className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-sky-600 text-white shadow-xs transition hover:bg-sky-700 active:scale-95"
+            title="+25 gal"
+          >
+            <Plus className="h-5 w-5" />
+          </button>
+          <button
+            type="button"
+            onClick={() => setWaterGallonsInput((v) => Math.round(Number(v || 0) + 100))}
+            aria-label="Increase Water by 100 Gallons"
+            className="h-12 shrink-0 rounded-2xl bg-sky-800 px-3.5 text-xs font-black text-white shadow-xs transition hover:bg-sky-900 active:scale-95"
+          >
+            +100 gal
+          </button>
+        </div>
+      </div>
+
+      {/* 5. House Temp (°C) */}
+      <div className="flex flex-col gap-3 rounded-2xl border-2 border-teal-200 bg-teal-50/75 p-4 sm:flex-row sm:items-center sm:justify-between sm:p-5 dark:border-teal-900/70 dark:bg-teal-950/30">
+        <div className="flex min-w-0 items-start gap-3.5 sm:items-center">
+          <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-teal-100 text-teal-800 shadow-xs dark:bg-teal-900/60 dark:text-teal-200">
+            <Thermometer className="h-6 w-6" />
+          </div>
+          <div className="min-w-0 space-y-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <h3 className="text-base font-black text-slate-900 dark:text-white">
+                House Temp (°C)
+              </h3>
+              <span className="rounded-full bg-teal-100 px-2.5 py-0.5 text-[11px] font-extrabold text-teal-900 dark:bg-teal-900/60 dark:text-teal-200">
+                {latestTemp !== undefined
+                  ? `Last Logged: ${latestTemp}°C (${currentShiftLogs.length} entries)`
+                  : '0 entries today'}
+              </span>
+            </div>
+            <p className="text-xs font-medium text-teal-900/80 dark:text-teal-200/80">
+              Mandatory house interior temperature (°C, ±0.5°C steppers)
+            </p>
+          </div>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2 sm:justify-end">
+          <button
+            type="button"
+            onClick={() => setManualTempC((t) => Number((Number(t || 0) - 0.5).toFixed(1)))}
+            aria-label="Decrease House Temperature by 0.5°C"
+            className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl border-2 border-teal-300 bg-white text-teal-800 shadow-xs transition hover:bg-teal-100 active:scale-95 dark:border-teal-800 dark:bg-slate-900 dark:text-teal-300 dark:hover:bg-teal-950"
+          >
+            <Minus className="h-5 w-5" />
+          </button>
+          <div className="flex h-12 min-w-[7.5rem] items-center justify-center gap-1 rounded-2xl border-2 border-teal-200 bg-white px-3 focus-within:border-teal-600 dark:border-teal-800 dark:bg-slate-900">
+            <input
+              type="number"
+              step="0.1"
+              required
+              value={manualTempC}
+              onFocus={(e) => e.target.select()}
+              onChange={(e) => setManualTempC(e.target.value)}
+              aria-label="Manual House Temperature Celsius"
+              className="w-20 bg-transparent text-center text-2xl font-black text-slate-900 tabular-nums focus:outline-none dark:text-white"
+            />
+            <span className="shrink-0 text-sm font-black text-teal-700 dark:text-teal-300">
+              °C
+            </span>
+          </div>
+          <button
+            type="button"
+            onClick={() => setManualTempC((t) => Number((Number(t || 0) + 0.5).toFixed(1)))}
+            aria-label="Increase House Temperature by 0.5°C"
+            className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-teal-600 text-white shadow-xs transition hover:bg-teal-700 active:scale-95"
+          >
+            <Plus className="h-5 w-5" />
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function HealthResourceLog() {
   const {
     state,
@@ -54,6 +736,7 @@ export default function HealthResourceLog() {
     selectedHouseId,
     setSelectedHouseId,
     manualOverrideEnabled,
+    setManualOverrideEnabled,
     addHealthLog,
     updateLockedHealthLog,
     addFeedDelivery,
@@ -180,6 +863,34 @@ export default function HealthResourceLog() {
     [state.settings?.shiftConfig]
   );
   const [lightboxPhoto, setLightboxPhoto] = useState(null);
+
+  useEffect(() => {
+    if (!activeHouse) return;
+    setManualTempC(
+      Number(
+        (
+          (Number(activeHouse.zones?.start || 28) +
+            Number(activeHouse.zones?.middle || 28) +
+            Number(activeHouse.zones?.end || 28)) /
+          3
+        ).toFixed(1)
+      )
+    );
+    setFeedPhase(activeHouse.currentFeedPhase || 'Grower');
+    setBagsConsumed(0);
+    setWaterGallonsInput(0);
+    setEditingLogId(null);
+    setZones({
+      start: activeHouse.zones?.start ?? 29,
+      middle: activeHouse.zones?.middle ?? 29,
+      end: activeHouse.zones?.end ?? 29,
+      outside: activeHouse.zones?.outside ?? 42,
+      humidity: activeHouse.zones?.humidity ?? 58,
+      ammoniaPpm: activeHouse.zones?.ammoniaPpm ?? 10,
+      co2Ppm: activeHouse.zones?.co2Ppm ?? 1950,
+      negativePressurePa: activeHouse.zones?.negativePressurePa ?? 25,
+    });
+  }, [activeHouse?.id]);
 
   if (!activeHouse) {
     return (
@@ -541,10 +1252,10 @@ export default function HealthResourceLog() {
         : Number((siloCurrentKg / 1000).toFixed(1));
 
     return (
-      <div className="mx-auto max-w-4xl space-y-5">
-        {/* Compact Top Strip: House Pills, Auto-Detected Shift Badge & History Modal Trigger */}
-        <div className="flex flex-col justify-between gap-3 rounded-3xl border border-slate-200 bg-white/95 p-4 shadow-sm backdrop-blur-sm sm:flex-row sm:items-center dark:border-slate-700 dark:bg-slate-800/95">
-          <div className="space-y-2">
+      <div className="mx-auto max-w-5xl space-y-5">
+        {/* Top Strip: Auto-Detected Shift, House Selection Cards & History Trigger */}
+        <div className="space-y-4 rounded-3xl border border-slate-200 bg-white/95 p-4 shadow-sm backdrop-blur-sm sm:p-5 dark:border-slate-700 dark:bg-slate-800/95">
+          <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="flex flex-wrap items-center gap-2">
               <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-100 px-3 py-1 text-xs font-extrabold text-emerald-950 dark:bg-emerald-950/70 dark:text-emerald-300">
                 <Clock className="h-3.5 w-3.5" />
@@ -558,41 +1269,35 @@ export default function HealthResourceLog() {
               )}
             </div>
 
-            <div className="flex flex-wrap items-center gap-2">
-              {selectableHouses.map((h) => {
-                const selected = h.id === activeHouse.id;
-                return (
-                  <button
-                    key={h.id}
-                    type="button"
-                    onClick={() => handleSelectHouse(h.id)}
-                    className={`rounded-2xl px-4 py-2 text-xs font-black transition ${
-                      selected
-                        ? 'bg-emerald-800 text-white shadow-sm'
-                        : 'border border-slate-200 bg-slate-50 text-slate-700 hover:bg-emerald-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200'
-                    }`}
-                  >
-                    {h.name} {h.phase === 'cleaning' ? '• Cleaning' : ''}
-                  </button>
-                );
-              })}
-            </div>
+            <button
+              type="button"
+              onClick={() => setShowHistoryModal(true)}
+              className="inline-flex shrink-0 items-center justify-center gap-2 rounded-2xl border border-slate-200 bg-slate-50 px-4 py-2 text-xs font-extrabold text-slate-800 shadow-xs transition hover:bg-emerald-50 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100 dark:hover:bg-slate-800"
+            >
+              <History className="h-4 w-4 text-emerald-700 dark:text-emerald-400" />
+              <span>History</span>
+              <span className="rounded-full bg-emerald-800 px-2 py-0.5 text-[10px] font-black text-white">
+                {currentShiftLogs.length}
+              </span>
+            </button>
           </div>
 
-          <button
-            type="button"
-            onClick={() => setShowHistoryModal(true)}
-            className="inline-flex shrink-0 items-center justify-center gap-2 self-start rounded-2xl border border-slate-200 bg-slate-50 px-4 py-2.5 text-xs font-extrabold text-slate-800 shadow-xs transition hover:bg-emerald-50 sm:self-center dark:border-slate-700 dark:bg-slate-900 dark:text-slate-100"
-          >
-            <History className="h-4 w-4 text-emerald-700 dark:text-emerald-400" />
-            <span>History</span>
-            <span className="rounded-full bg-emerald-800 px-2 py-0.5 text-[10px] font-black text-white">
-              {currentShiftLogs.length}
-            </span>
-          </button>
+          <div>
+            <p className="mb-2 text-xs font-extrabold tracking-wider text-slate-500 uppercase dark:text-slate-400">
+              Select Broiler House ({selectableHouses.length})
+            </p>
+            <BroilerHouseSelectionGrid
+              houses={selectableHouses}
+              selectedHouseId={activeHouse.id}
+              onSelectHouse={handleSelectHouse}
+              healthLogs={state.healthLogs}
+              chicksPerCarton={chicksPerCarton}
+              settings={state.settings}
+            />
+          </div>
         </div>
 
-        {/* 1. TOP CARD: Uniform Tactile +/- Field Counters */}
+        {/* 1. TOP CARD: Vertically Stacked Daily Counters */}
         {isCleaningLocked ? (
           <div className="rounded-3xl border-2 border-sky-200 bg-sky-50/95 p-6 text-center shadow-sm dark:border-sky-800 dark:bg-sky-950/40">
             <p className="text-base font-black text-sky-950 dark:text-sky-200">
@@ -605,13 +1310,23 @@ export default function HealthResourceLog() {
         ) : (
           <form
             onSubmit={handleSubmitIncrementalLog}
-            className="rounded-3xl border border-slate-200 bg-white/95 p-5 shadow-sm dark:border-slate-700 dark:bg-slate-800/95"
+            className="rounded-3xl border border-slate-200 bg-white/95 p-4 shadow-sm sm:p-5 dark:border-slate-700 dark:bg-slate-800/95"
           >
             <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-              <h2 className="text-base font-black text-slate-900 dark:text-white">
-                Daily Counters — {activeHouse.name}
-              </h2>
-              <span className="text-xs font-bold text-slate-500 dark:text-slate-400">
+              <div className="flex items-center gap-2.5">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
+                  <BroilerHouseSvgIcon className="h-8 w-8" isSilo={isSiloHouse} />
+                </div>
+                <div>
+                  <h2 className="text-base font-black text-slate-900 dark:text-white">
+                    Daily Counters — {activeHouse.name}
+                  </h2>
+                  <p className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">
+                    Tap +/- or enter readings directly • Incremental entries lock on submit
+                  </p>
+                </div>
+              </div>
+              <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-bold text-slate-700 dark:bg-emerald-950/50 dark:text-slate-300">
                 Active Birds:{' '}
                 <strong className="font-black text-emerald-800 dark:text-emerald-400">
                   {Math.max(
@@ -622,185 +1337,34 @@ export default function HealthResourceLog() {
               </span>
             </div>
 
-            <div
-              className={`grid grid-cols-1 gap-3.5 sm:grid-cols-2 ${
-                isSiloHouse ? 'lg:grid-cols-4' : 'lg:grid-cols-5'
-              }`}
-            >
-              {/* Dead Birds */}
-              <div className="flex flex-col items-center justify-between rounded-2xl border border-rose-200 bg-rose-50/60 p-4 dark:border-rose-900/60 dark:bg-rose-950/25">
-                <span className="inline-flex items-center gap-1.5 text-xs font-extrabold text-rose-900 uppercase dark:text-rose-300">
-                  <Skull className="h-4 w-4" />
-                  Dead
-                </span>
-                <div className="my-3 flex items-center gap-3">
-                  <button
-                    type="button"
-                    onClick={() => setMortalities((v) => Math.max(0, Number(v) - 1))}
-                    aria-label="Decrease Dead count"
-                    className="flex h-12 w-12 items-center justify-center rounded-2xl border border-rose-300 bg-white text-rose-800 shadow-xs transition active:scale-95 dark:border-rose-800 dark:bg-slate-900 dark:text-rose-300"
-                  >
-                    <Minus className="h-5 w-5" />
-                  </button>
-                  <span className="w-12 text-center text-3xl font-black text-slate-900 tabular-nums dark:text-white">
-                    {mortalities}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => setMortalities((v) => Number(v) + 1)}
-                    aria-label="Increase Dead count"
-                    className="flex h-12 w-12 items-center justify-center rounded-2xl bg-rose-600 text-white shadow-xs transition active:scale-95 hover:bg-rose-700"
-                  >
-                    <Plus className="h-5 w-5" />
-                  </button>
-                </div>
-                <span className="text-[11px] font-semibold text-rose-700 dark:text-rose-300">
-                  Birds
-                </span>
-              </div>
-
-              {/* Sick / Culls */}
-              <div className="flex flex-col items-center justify-between rounded-2xl border border-amber-200 bg-amber-50/60 p-4 dark:border-amber-900/60 dark:bg-amber-950/25">
-                <span className="text-xs font-extrabold text-amber-900 uppercase dark:text-amber-300">
-                  Culls
-                </span>
-                <div className="my-3 flex items-center gap-3">
-                  <button
-                    type="button"
-                    onClick={() => setCulls((v) => Math.max(0, Number(v) - 1))}
-                    aria-label="Decrease Culls count"
-                    className="flex h-12 w-12 items-center justify-center rounded-2xl border border-amber-300 bg-white text-amber-800 shadow-xs transition active:scale-95 dark:border-amber-800 dark:bg-slate-900 dark:text-amber-300"
-                  >
-                    <Minus className="h-5 w-5" />
-                  </button>
-                  <span className="w-12 text-center text-3xl font-black text-slate-900 tabular-nums dark:text-white">
-                    {culls}
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => setCulls((v) => Number(v) + 1)}
-                    aria-label="Increase Culls count"
-                    className="flex h-12 w-12 items-center justify-center rounded-2xl bg-amber-500 text-white shadow-xs transition active:scale-95 hover:bg-amber-600"
-                  >
-                    <Plus className="h-5 w-5" />
-                  </button>
-                </div>
-                <span className="text-[11px] font-semibold text-amber-800 dark:text-amber-300">
-                  Birds
-                </span>
-              </div>
-
-              {/* Feed Bags (STRICTLY HIDDEN on Silo-Based Houses) */}
-              {!isSiloHouse && (
-                <div className="flex flex-col items-center justify-between rounded-2xl border border-emerald-200 bg-emerald-50/60 p-4 dark:border-emerald-900/60 dark:bg-emerald-950/25">
-                  <span className="inline-flex items-center gap-1.5 text-xs font-extrabold text-emerald-900 uppercase dark:text-emerald-300">
-                    <Wheat className="h-4 w-4" />
-                    Feed Bags
-                  </span>
-                  <div className="my-3 flex items-center gap-3">
-                    <button
-                      type="button"
-                      onClick={() => setBagsConsumed((v) => Math.max(0, Number(v) - 1))}
-                      aria-label="Decrease Feed Bags"
-                      className="flex h-12 w-12 items-center justify-center rounded-2xl border border-emerald-300 bg-white text-emerald-800 shadow-xs transition active:scale-95 dark:border-emerald-800 dark:bg-slate-900 dark:text-emerald-300"
-                    >
-                      <Minus className="h-5 w-5" />
-                    </button>
-                    <span className="w-12 text-center text-3xl font-black text-slate-900 tabular-nums dark:text-white">
-                      {bagsConsumed}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => setBagsConsumed((v) => Number(v) + 1)}
-                      aria-label="Increase Feed Bags"
-                      className="flex h-12 w-12 items-center justify-center rounded-2xl bg-emerald-700 text-white shadow-xs transition active:scale-95 hover:bg-emerald-800"
-                    >
-                      <Plus className="h-5 w-5" />
-                    </button>
-                  </div>
-                  <span className="text-[11px] font-semibold text-emerald-800 dark:text-emerald-300">
-                    {bagsConsumed * bagWeightKg} kg ({bagWeightKg}kg/bag)
-                  </span>
-                </div>
-              )}
-
-              {/* Water (Gallons) */}
-              <div className="flex flex-col items-center justify-between rounded-2xl border border-sky-200 bg-sky-50/60 p-4 dark:border-sky-900/60 dark:bg-sky-950/25">
-                <span className="inline-flex items-center gap-1.5 text-xs font-extrabold text-sky-900 uppercase dark:text-sky-300">
-                  <Droplets className="h-4 w-4" />
-                  Water (Gallons)
-                </span>
-                <div className="my-3 flex items-center gap-3">
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setWaterGallonsInput((v) => Math.max(0, Math.round(Number(v || 0) - 25)))
-                    }
-                    aria-label="Decrease Water Gallons"
-                    className="flex h-12 w-12 items-center justify-center rounded-2xl border border-sky-300 bg-white text-sky-800 shadow-xs transition active:scale-95 dark:border-sky-800 dark:bg-slate-900 dark:text-sky-300"
-                  >
-                    <Minus className="h-5 w-5" />
-                  </button>
-                  <input
-                    type="number"
-                    min="0"
-                    value={waterGallonsInput}
-                    onChange={(e) => setWaterGallonsInput(Math.max(0, Number(e.target.value || 0)))}
-                    aria-label="Water in Gallons"
-                    className="w-16 bg-transparent text-center text-2xl font-black text-slate-900 tabular-nums focus:outline-none dark:text-white"
-                  />
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setWaterGallonsInput((v) => Math.round(Number(v || 0) + 25))
-                    }
-                    aria-label="Increase Water Gallons"
-                    className="flex h-12 w-12 items-center justify-center rounded-2xl bg-sky-600 text-white shadow-xs transition active:scale-95 hover:bg-sky-700"
-                  >
-                    <Plus className="h-5 w-5" />
-                  </button>
-                </div>
-                <span className="text-[11px] font-semibold text-sky-800 dark:text-sky-300">
-                  Gallons (±25 gal)
-                </span>
-              </div>
-
-              {/* House Temp (°C) */}
-              <div className="flex flex-col items-center justify-between rounded-2xl border border-teal-200 bg-teal-50/60 p-4 dark:border-teal-900/60 dark:bg-teal-950/25">
-                <span className="inline-flex items-center gap-1.5 text-xs font-extrabold text-teal-900 uppercase dark:text-teal-300">
-                  <Thermometer className="h-4 w-4" />
-                  Temp (°C)
-                </span>
-                <div className="my-3 flex items-center gap-3">
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setManualTempC((t) => Number((Number(t) - 0.5).toFixed(1)))
-                    }
-                    aria-label="Decrease House Temperature"
-                    className="flex h-12 w-12 items-center justify-center rounded-2xl border border-teal-300 bg-white text-teal-800 shadow-xs transition active:scale-95 dark:border-teal-800 dark:bg-slate-900 dark:text-teal-300"
-                  >
-                    <Minus className="h-5 w-5" />
-                  </button>
-                  <span className="w-16 text-center text-2xl font-black text-slate-900 tabular-nums dark:text-white">
-                    {manualTempC}°
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      setManualTempC((t) => Number((Number(t) + 0.5).toFixed(1)))
-                    }
-                    aria-label="Increase House Temperature"
-                    className="flex h-12 w-12 items-center justify-center rounded-2xl bg-teal-600 text-white shadow-xs transition active:scale-95 hover:bg-teal-700"
-                  >
-                    <Plus className="h-5 w-5" />
-                  </button>
-                </div>
-                <span className="text-[11px] font-semibold text-teal-800 dark:text-teal-300">
-                  Celsius (±0.5°C)
-                </span>
-              </div>
-            </div>
+            <DailyCountersStack
+              isManagement={false}
+              isSiloHouse={isSiloHouse}
+              bagWeightKg={bagWeightKg}
+              mortalities={mortalities}
+              setMortalities={setMortalities}
+              culls={culls}
+              setCulls={setCulls}
+              bagsConsumed={bagsConsumed}
+              setBagsConsumed={setBagsConsumed}
+              feedPhase={feedPhase}
+              setFeedPhase={setFeedPhase}
+              feedKgComputed={feedKgComputed}
+              stockBagsRemaining={stockBagsRemaining}
+              waterGallonsInput={waterGallonsInput}
+              setWaterGallonsInput={setWaterGallonsInput}
+              waterViewUnit={waterViewUnit}
+              setWaterViewUnit={setWaterViewUnit}
+              displayedWaterValue={displayedWaterValue}
+              handleWaterDisplayChange={handleWaterDisplayChange}
+              waterGallonsComputed={waterGallonsComputed}
+              waterLitersComputed={waterLitersComputed}
+              waterM3Computed={waterM3Computed}
+              manualTempC={manualTempC}
+              setManualTempC={setManualTempC}
+              shiftSubtotals={shiftSubtotals}
+              currentShiftLogs={currentShiftLogs}
+            />
 
             <button
               type="submit"
@@ -814,10 +1378,20 @@ export default function HealthResourceLog() {
 
         {/* 2. MIDDLE CARD: Clean Numbered Tasks (Task 1, Task 2, Task 3...) — Zero IDs or Filters */}
         <section className="rounded-3xl border border-slate-200 bg-white/95 p-5 shadow-sm dark:border-slate-700 dark:bg-slate-800/95">
-          <div className="mb-3.5 flex items-center justify-between gap-2">
-            <h3 className="text-base font-black text-slate-900 dark:text-white">
-              Today&apos;s Tasks — {activeHouse.name}
-            </h3>
+          <div className="mb-3.5 flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2.5">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
+                <ClipboardCheck className="h-5 w-5" />
+              </div>
+              <div>
+                <h3 className="text-base font-black text-slate-900 dark:text-white">
+                  Today&apos;s Tasks — {activeHouse.name}
+                </h3>
+                <p className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">
+                  Tap Mark Done or Mark Administered as you walk the house
+                </p>
+              </div>
+            </div>
             <span className="rounded-full bg-slate-100 px-3 py-1 text-xs font-extrabold text-slate-700 dark:bg-slate-900 dark:text-slate-300">
               {completedFieldCount} / {unifiedFieldTasks.length} Done
             </span>
@@ -828,83 +1402,93 @@ export default function HealthResourceLog() {
               No scheduled tasks remaining for {activeHouse.name} this shift.
             </p>
           ) : (
-            <div className="space-y-2.5">
-              {unifiedFieldTasks.map((item, idx) => (
-                <div
-                  key={item.key}
-                  className={`flex flex-col justify-between gap-3 rounded-2xl border p-4 sm:flex-row sm:items-center ${
-                    item.isDone
-                      ? 'border-emerald-200 bg-emerald-50/70 dark:border-emerald-900/50 dark:bg-emerald-950/25'
-                      : item.kind === 'med'
-                      ? 'border-indigo-200 bg-indigo-50/60 dark:border-indigo-900/50 dark:bg-indigo-950/25'
-                      : 'border-slate-200 bg-slate-50/80 dark:border-slate-700 dark:bg-slate-900/60'
-                  }`}
-                >
-                  <div className="space-y-1">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="rounded-full bg-slate-900 px-2.5 py-0.5 text-[11px] font-black text-white dark:bg-slate-700">
-                        Task {idx + 1}
-                      </span>
-                      <span className="text-sm font-black text-slate-900 dark:text-white">
-                        {item.title}
-                      </span>
+            <div className="space-y-3">
+              {unifiedFieldTasks.map((item, idx) => {
+                const { Icon: TaskIcon, badgeClass } = getFieldTaskVisualMeta(item);
+                return (
+                  <div
+                    key={item.key}
+                    className={`flex flex-col justify-between gap-3 rounded-2xl border-2 p-4 sm:flex-row sm:items-center ${
+                      item.isDone
+                        ? 'border-emerald-200 bg-emerald-50/70 dark:border-emerald-900/50 dark:bg-emerald-950/25'
+                        : item.kind === 'med'
+                        ? 'border-indigo-200 bg-indigo-50/60 dark:border-indigo-900/50 dark:bg-indigo-950/25'
+                        : 'border-slate-200 bg-slate-50/80 dark:border-slate-700 dark:bg-slate-900/60'
+                    }`}
+                  >
+                    <div className="flex min-w-0 items-start gap-3">
+                      <div
+                        className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl shadow-xs ${badgeClass}`}
+                      >
+                        <TaskIcon className="h-5 w-5" />
+                      </div>
+                      <div className="min-w-0 space-y-1">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="rounded-full bg-slate-900 px-2.5 py-0.5 text-[11px] font-black text-white dark:bg-slate-700">
+                            Task {idx + 1}
+                          </span>
+                          <span className="text-sm font-black text-slate-900 dark:text-white">
+                            {item.title}
+                          </span>
+                        </div>
+                        <p className="text-xs font-medium text-slate-600 dark:text-slate-300">
+                          {item.instructions}
+                        </p>
+                      </div>
                     </div>
-                    <p className="text-xs font-medium text-slate-600 dark:text-slate-300">
-                      {item.instructions}
-                    </p>
-                  </div>
 
-                  <div className="shrink-0">
-                    {item.isDone ? (
-                      <span className="inline-flex items-center gap-1.5 rounded-2xl bg-emerald-700 px-4 py-2 text-xs font-black text-white">
-                        <CheckCircle2 className="h-4 w-4" />
-                        {item.kind === 'med' ? 'Administered' : 'Done'}
-                      </span>
-                    ) : item.kind === 'med' ? (
-                      item.canAdminister ? (
+                    <div className="shrink-0">
+                      {item.isDone ? (
+                        <span className="inline-flex items-center gap-1.5 rounded-2xl bg-emerald-700 px-4 py-2 text-xs font-black text-white">
+                          <CheckCircle2 className="h-4 w-4" />
+                          {item.kind === 'med' ? 'Administered' : 'Done'}
+                        </span>
+                      ) : item.kind === 'med' ? (
+                        item.canAdminister ? (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              executeMedicationTask(
+                                item.raw.id,
+                                'Administered per scheduled water ratio'
+                              )
+                            }
+                            className="w-full rounded-2xl bg-indigo-700 px-5 py-2.5 text-xs font-black text-white shadow-sm transition hover:bg-indigo-800 active:scale-95 sm:w-auto"
+                          >
+                            Mark Administered
+                          </button>
+                        ) : (
+                          <span className="inline-flex rounded-2xl border border-amber-300 bg-amber-50 px-3 py-1.5 text-[11px] font-extrabold text-amber-800 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
+                            Supervisor Med Task
+                          </span>
+                        )
+                      ) : (
                         <button
                           type="button"
-                          onClick={() =>
-                            executeMedicationTask(
-                              item.raw.id,
-                              'Administered per scheduled water ratio'
-                            )
-                          }
-                          className="w-full rounded-2xl bg-indigo-700 px-5 py-2.5 text-xs font-black text-white shadow-sm transition hover:bg-indigo-800 active:scale-95 sm:w-auto"
+                          onClick={() => {
+                            if (item.sourceType === 'recurring') {
+                              completeRecurringTaskInstance({
+                                completionKey: item.raw.completionKey,
+                                ruleId: item.raw.recurringRuleId,
+                                houseId: activeHouse.id,
+                                note: 'Completed on shift',
+                              });
+                            } else {
+                              submitTaskForVerification({
+                                taskId: item.raw.id,
+                                workerNote: 'Completed during field shift',
+                              });
+                            }
+                          }}
+                          className="w-full rounded-2xl bg-emerald-700 px-5 py-2.5 text-xs font-black text-white shadow-sm transition hover:bg-emerald-800 active:scale-95 sm:w-auto"
                         >
-                          Mark Administered
+                          Mark Done
                         </button>
-                      ) : (
-                        <span className="inline-flex rounded-2xl border border-amber-300 bg-amber-50 px-3 py-1.5 text-[11px] font-extrabold text-amber-800 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-300">
-                          Supervisor Med Task
-                        </span>
-                      )
-                    ) : (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          if (item.sourceType === 'recurring') {
-                            completeRecurringTaskInstance({
-                              completionKey: item.raw.completionKey,
-                              ruleId: item.raw.recurringRuleId,
-                              houseId: activeHouse.id,
-                              note: 'Completed on shift',
-                            });
-                          } else {
-                            submitTaskForVerification({
-                              taskId: item.raw.id,
-                              workerNote: 'Completed during field shift',
-                            });
-                          }
-                        }}
-                        className="w-full rounded-2xl bg-emerald-700 px-5 py-2.5 text-xs font-black text-white shadow-sm transition hover:bg-emerald-800 active:scale-95 sm:w-auto"
-                      >
-                        Mark Done
-                      </button>
-                    )}
+                      )}
+                    </div>
                   </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           )}
         </section>
@@ -914,9 +1498,19 @@ export default function HealthResourceLog() {
           onSubmit={handleFieldObservationSubmit}
           className="rounded-3xl border border-slate-200 bg-white/95 p-5 shadow-sm dark:border-slate-700 dark:bg-slate-800/95"
         >
-          <h3 className="mb-3 text-base font-black text-slate-900 dark:text-white">
-            Observation &amp; Photo
-          </h3>
+          <div className="mb-3 flex items-center gap-2.5">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-300">
+              <Camera className="h-5 w-5" />
+            </div>
+            <div>
+              <h3 className="text-base font-black text-slate-900 dark:text-white">
+                Observation &amp; Photo
+              </h3>
+              <p className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">
+                Snap a quick photo or note any leak, fan issue, or flock observation
+              </p>
+            </div>
+          </div>
 
           <div className="space-y-3">
             <div className="flex flex-wrap items-center gap-3">
@@ -933,7 +1527,7 @@ export default function HealthResourceLog() {
               </label>
 
               {incidentPhoto && (
-                <div className="relative h-14 w-14 overflow-hidden rounded-2xl border border-slate-300">
+                <div className="relative h-14 w-14 overflow-hidden rounded-2xl border border-slate-300 dark:border-slate-600">
                   <img
                     src={incidentPhoto}
                     alt="Observation preview"
@@ -1111,51 +1705,50 @@ export default function HealthResourceLog() {
 
   return (
     <div className="space-y-6">
-      {/* Header & House Selector */}
-      <div className="flex flex-col justify-between gap-4 rounded-3xl border border-slate-200 bg-white/95 p-5 shadow-sm backdrop-blur-sm lg:flex-row lg:items-center">
-        <div>
-          <div className="flex flex-wrap items-center gap-2">
-            <h2 className="text-xl font-black text-slate-900">
-              Daily Health, Water &amp; Shift Log
-            </h2>
-            <span
-              className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-[11px] font-extrabold ${
-                isSiloHouse
-                  ? 'border-indigo-200 bg-indigo-50 text-indigo-800 dark:border-indigo-800 dark:bg-indigo-950/60 dark:text-indigo-200'
-                  : 'border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-800 dark:bg-amber-950/60 dark:text-amber-200'
-              }`}
-            >
-              {isSiloHouse ? <Package className="h-3 w-3" /> : <Wheat className="h-3 w-3" />}
-              {isSiloHouse
-                ? `Silo-Based (${siloCapacityTons}T)`
-                : `Bag-Based (${bagWeightKg}kg Fixed)`}
-            </span>
-          </div>
-          <p className="mt-1 text-xs font-medium text-slate-600">
-            Incremental shift entries lock automatically upon submission • Water defaults to Gallons (gal)
-          </p>
-          {isManagement && (
-            <p className="mt-0.5 text-[11px] font-semibold text-emerald-700 dark:text-emerald-400">
-              Management Note: Weekly sample bird weighing is recorded in Weights &amp; Reports.
+      {/* Header & Large Rectangular Broiler House Cards */}
+      <div className="space-y-4 rounded-3xl border border-slate-200 bg-white/95 p-5 shadow-sm backdrop-blur-sm dark:border-slate-700 dark:bg-slate-800/95">
+        <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-center">
+          <div>
+            <div className="flex flex-wrap items-center gap-2">
+              <h2 className="text-xl font-black text-slate-900 dark:text-white">
+                Daily Health, Water &amp; Shift Log
+              </h2>
+              <span
+                className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-[11px] font-extrabold ${
+                  isSiloHouse
+                    ? 'border-indigo-200 bg-indigo-50 text-indigo-800 dark:border-indigo-800 dark:bg-indigo-950/60 dark:text-indigo-200'
+                    : 'border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-800 dark:bg-amber-950/60 dark:text-amber-200'
+                }`}
+              >
+                {isSiloHouse ? <Package className="h-3 w-3" /> : <Wheat className="h-3 w-3" />}
+                {isSiloHouse
+                  ? `Silo-Based (${siloCapacityTons}T)`
+                  : `Bag-Based (${bagWeightKg}kg Fixed)`}
+              </span>
+            </div>
+            <p className="mt-1 text-xs font-medium text-slate-600 dark:text-slate-300">
+              Incremental shift entries lock automatically upon submission • Water defaults to Gallons (gal)
             </p>
-          )}
+            {isManagement && (
+              <p className="mt-0.5 text-[11px] font-semibold text-emerald-700 dark:text-emerald-400">
+                Management Note: Weekly sample bird weighing is recorded in Weights &amp; Reports.
+              </p>
+            )}
+          </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
-          {selectableHouses.map((h) => (
-            <button
-              key={h.id}
-              type="button"
-              onClick={() => handleSelectHouse(h.id)}
-              className={`rounded-full px-3.5 py-2 text-xs font-extrabold transition ${
-                h.id === activeHouse.id
-                  ? 'bg-emerald-800 text-white shadow-sm'
-                  : 'border border-slate-200 bg-slate-50 text-slate-700 hover:bg-emerald-50'
-              }`}
-            >
-              {h.name} {h.phase === 'cleaning' ? '(Cleaning)' : ''}
-            </button>
-          ))}
+        <div>
+          <p className="mb-2 text-xs font-extrabold tracking-wider text-slate-500 uppercase dark:text-slate-400">
+            Select Broiler House ({selectableHouses.length})
+          </p>
+          <BroilerHouseSelectionGrid
+            houses={selectableHouses}
+            selectedHouseId={activeHouse.id}
+            onSelectHouse={handleSelectHouse}
+            healthLogs={state.healthLogs}
+            chicksPerCarton={chicksPerCarton}
+            settings={state.settings}
+          />
         </div>
       </div>
 
@@ -1171,9 +1764,11 @@ export default function HealthResourceLog() {
       ) : (
         <form onSubmit={handleSubmitIncrementalLog} className="space-y-5">
           {/* Shift Selector & Live Inventory Preview */}
-          <div className="flex flex-wrap items-center justify-between gap-3 rounded-3xl border border-slate-200 bg-white/95 px-5 py-3.5 shadow-sm">
+          <div className="flex flex-wrap items-center justify-between gap-3 rounded-3xl border border-slate-200 bg-white/95 px-5 py-3.5 shadow-sm dark:border-slate-700 dark:bg-slate-800/95">
             <div className="flex flex-wrap items-center gap-2">
-              <span className="text-xs font-extrabold text-slate-500 uppercase">Shift:</span>
+              <span className="text-xs font-extrabold text-slate-500 uppercase dark:text-slate-400">
+                Shift:
+              </span>
               {shiftOptions.map((s) => (
                 <button
                   key={s}
@@ -1182,14 +1777,14 @@ export default function HealthResourceLog() {
                   className={`rounded-full px-3.5 py-1.5 text-xs font-bold transition ${
                     shift === s
                       ? 'bg-emerald-800 text-white shadow-sm'
-                      : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                      : 'bg-slate-100 text-slate-700 hover:bg-slate-200 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-700'
                   }`}
                 >
                   {s}
                 </button>
               ))}
             </div>
-            <div className="text-xs font-bold text-slate-700">
+            <div className="text-xs font-bold text-slate-700 dark:text-slate-200">
               Projected Active Birds:{' '}
               <span className="text-base font-black text-emerald-800 dark:text-emerald-400">
                 {Math.max(
@@ -1200,148 +1795,119 @@ export default function HealthResourceLog() {
             </div>
           </div>
 
-          {/* 3 Tactile Counter Cards: Dead Chicks, Sick/Culls, Mandatory Temp */}
-          <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
-            {/* Dead Chicks */}
-            <div className="overflow-hidden rounded-3xl border border-red-200 bg-white/95 shadow-sm dark:border-red-900">
-              <div className="bg-red-100 px-4 py-2 text-xs font-extrabold tracking-wider text-red-900 uppercase dark:bg-red-950 dark:text-red-200">
-                Mortality
-              </div>
-              <div className="p-5 text-center">
-                <p className="text-xs font-extrabold tracking-wide text-slate-700 uppercase">
-                  Dead Chicks (This Entry)
-                </p>
-                <div className="mt-3 flex items-center justify-center gap-3">
-                  <button
-                    type="button"
-                    onClick={() => setMortalities((v) => Math.max(0, Number(v) - 1))}
-                    className="flex h-14 w-14 items-center justify-center rounded-2xl border-2 border-slate-200 bg-slate-50 text-slate-800 transition active:scale-95 hover:bg-slate-100"
-                    aria-label="Decrease dead chicks"
-                  >
-                    <Minus className="h-6 w-6" />
-                  </button>
-                  <input
-                    type="number"
-                    min="0"
-                    value={mortalities}
-                    onChange={(e) => setMortalities(Math.max(0, Number(e.target.value)))}
-                    className="h-14 w-28 rounded-2xl bg-red-100/90 text-center text-3xl font-black text-red-700 focus:ring-2 focus:ring-red-400 focus:outline-none dark:bg-red-950/60 dark:text-red-300"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setMortalities((v) => Number(v) + 1)}
-                    className="flex h-14 w-14 items-center justify-center rounded-2xl border-2 border-red-200 bg-red-50 text-red-700 transition active:scale-95 hover:bg-red-100 dark:border-red-800 dark:bg-red-950/40 dark:text-red-300"
-                    aria-label="Increase dead chicks"
-                  >
-                    <Plus className="h-6 w-6" />
-                  </button>
+          {/* Vertically Stacked Daily Counters */}
+          <div className="rounded-3xl border border-slate-200 bg-white/95 p-4 shadow-sm sm:p-5 dark:border-slate-700 dark:bg-slate-800/95">
+            <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2.5">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-emerald-100 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-300">
+                  <BroilerHouseSvgIcon className="h-8 w-8" isSilo={isSiloHouse} />
                 </div>
-                <Skull className="mx-auto mt-3 h-6 w-6 text-red-400" />
+                <div>
+                  <h3 className="text-base font-black text-slate-900 dark:text-white">
+                    Daily Shift Counters — {activeHouse.name}
+                  </h3>
+                  <p className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">
+                    {isSiloHouse
+                      ? 'Feed Bags counter hidden for Silo-Based house • Manage bulk feed below'
+                      : `Bag-Based (${bagWeightKg}kg fixed bags) • Water defaults to Gallons`}
+                  </p>
+                </div>
               </div>
             </div>
 
-            {/* Sick / Culls */}
-            <div className="overflow-hidden rounded-3xl border border-amber-200 bg-white/95 shadow-sm dark:border-amber-900">
-              <div className="bg-amber-100 px-4 py-2 text-xs font-extrabold tracking-wider text-amber-900 uppercase dark:bg-amber-950 dark:text-amber-200">
-                Health / Culls
-              </div>
-              <div className="p-5 text-center">
-                <p className="text-xs font-extrabold tracking-wide text-slate-700 uppercase">
-                  Sick Chicks (Culls)
-                </p>
-                <div className="mt-3 flex items-center justify-center gap-3">
-                  <button
-                    type="button"
-                    onClick={() => setCulls((v) => Math.max(0, Number(v) - 1))}
-                    className="flex h-14 w-14 items-center justify-center rounded-2xl border-2 border-slate-200 bg-slate-50 text-slate-800 transition active:scale-95 hover:bg-slate-100"
-                    aria-label="Decrease sick chicks"
-                  >
-                    <Minus className="h-6 w-6" />
-                  </button>
-                  <input
-                    type="number"
-                    min="0"
-                    value={culls}
-                    onChange={(e) => setCulls(Math.max(0, Number(e.target.value)))}
-                    className="h-14 w-28 rounded-2xl bg-amber-100/90 text-center text-3xl font-black text-amber-700 focus:ring-2 focus:ring-amber-400 focus:outline-none dark:bg-amber-950/60 dark:text-amber-300"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setCulls((v) => Number(v) + 1)}
-                    className="flex h-14 w-14 items-center justify-center rounded-2xl border-2 border-amber-200 bg-amber-50 text-amber-700 transition active:scale-95 hover:bg-amber-100 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-300"
-                    aria-label="Increase sick chicks"
-                  >
-                    <Plus className="h-6 w-6" />
-                  </button>
-                </div>
-                <HeartPulse className="mx-auto mt-3 h-6 w-6 text-amber-500" />
-              </div>
-            </div>
-
-            {/* Mandatory Manual House Temp */}
-            <div className="overflow-hidden rounded-3xl border border-emerald-300 bg-white/95 shadow-sm dark:border-emerald-800">
-              <div className="bg-emerald-800 px-4 py-2 text-xs font-extrabold tracking-wider text-white uppercase">
-                Environment (Mandatory)
-              </div>
-              <div className="p-5 text-center">
-                <p className="text-xs font-extrabold tracking-wide text-slate-700 uppercase">
-                  Manual House Temp (°C)
-                </p>
-                <div className="mt-3 flex items-center justify-center gap-3">
-                  <button
-                    type="button"
-                    onClick={() => setManualTempC((t) => Number((Number(t) - 0.2).toFixed(1)))}
-                    className="flex h-14 w-14 items-center justify-center rounded-2xl border-2 border-slate-200 bg-slate-50 text-slate-800 transition active:scale-95 hover:bg-slate-100"
-                    aria-label="Decrease house temperature"
-                  >
-                    <Minus className="h-6 w-6" />
-                  </button>
-                  <input
-                    type="number"
-                    step="0.1"
-                    required
-                    value={manualTempC}
-                    onChange={(e) => setManualTempC(e.target.value)}
-                    className="h-14 w-28 rounded-2xl bg-emerald-50 text-center text-2xl font-black text-emerald-900 focus:ring-2 focus:ring-emerald-500 focus:outline-none dark:bg-emerald-950/60 dark:text-emerald-200"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setManualTempC((t) => Number((Number(t) + 0.2).toFixed(1)))}
-                    className="flex h-14 w-14 items-center justify-center rounded-2xl border-2 border-emerald-200 bg-emerald-50 text-emerald-800 transition active:scale-95 hover:bg-emerald-100 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300"
-                    aria-label="Increase house temperature"
-                  >
-                    <Plus className="h-6 w-6" />
-                  </button>
-                </div>
-                <Thermometer className="mx-auto mt-3 h-6 w-6 text-emerald-700 dark:text-emerald-400" />
-              </div>
-            </div>
+            <DailyCountersStack
+              isManagement={isManagement}
+              isSiloHouse={isSiloHouse}
+              bagWeightKg={bagWeightKg}
+              mortalities={mortalities}
+              setMortalities={setMortalities}
+              culls={culls}
+              setCulls={setCulls}
+              bagsConsumed={bagsConsumed}
+              setBagsConsumed={setBagsConsumed}
+              feedPhase={feedPhase}
+              setFeedPhase={setFeedPhase}
+              feedKgComputed={feedKgComputed}
+              stockBagsRemaining={stockBagsRemaining}
+              showDeliveryForm={showDeliveryForm}
+              setShowDeliveryForm={setShowDeliveryForm}
+              waterGallonsInput={waterGallonsInput}
+              setWaterGallonsInput={setWaterGallonsInput}
+              waterViewUnit={waterViewUnit}
+              setWaterViewUnit={setWaterViewUnit}
+              displayedWaterValue={displayedWaterValue}
+              handleWaterDisplayChange={handleWaterDisplayChange}
+              waterGallonsComputed={waterGallonsComputed}
+              waterLitersComputed={waterLitersComputed}
+              waterM3Computed={waterM3Computed}
+              manualTempC={manualTempC}
+              setManualTempC={setManualTempC}
+              shiftSubtotals={shiftSubtotals}
+              currentShiftLogs={currentShiftLogs}
+            />
           </div>
 
+          {/* Silo-Based House Info Card (when isSiloHouse is true) */}
+          {isSiloHouse && (
+            <div className="rounded-3xl border border-indigo-200 bg-indigo-50/75 p-5 shadow-sm dark:border-indigo-800 dark:bg-indigo-950/35">
+              <div className="flex items-center gap-2">
+                <Package className="h-5 w-5 text-indigo-700 dark:text-indigo-300" />
+                <h3 className="text-sm font-extrabold text-indigo-950 dark:text-indigo-200">
+                  Silo-Based House — Bulk feed is managed in Management Silo Refills
+                </h3>
+              </div>
+              <p className="mt-1.5 text-xs font-medium text-indigo-900/90 dark:text-indigo-300">
+                This house runs automated auger feeding from its {siloCapacityTons}-Ton bulk silo.
+                Daily Feed Bags entry is hidden; log truck refills or sight-glass readings below.
+              </p>
+
+              <div className="mt-3.5 rounded-2xl border border-indigo-200 bg-white/90 p-3.5 dark:border-indigo-800 dark:bg-slate-900/80">
+                <div className="flex items-center justify-between text-xs font-extrabold text-slate-800 dark:text-slate-100">
+                  <span>Current Bulk Silo Level</span>
+                  <span className="text-indigo-700 dark:text-indigo-300">
+                    {(siloCurrentKg / 1000).toFixed(2)} / {siloCapacityTons} T ({siloFillPct}%)
+                  </span>
+                </div>
+                <div className="mt-2 h-3 w-full overflow-hidden rounded-full bg-indigo-100 dark:bg-indigo-900">
+                  <div
+                    className="h-full rounded-full bg-indigo-700"
+                    style={{ width: `${siloFillPct}%` }}
+                  />
+                </div>
+                {activeHouse.lastSiloRefill && (
+                  <p className="mt-2 text-[11px] font-semibold text-slate-600 dark:text-slate-300">
+                    Last Truck Refill: {activeHouse.lastSiloRefill.tonsAdded}T on{' '}
+                    {activeHouse.lastSiloRefill.date}
+                  </p>
+                )}
+              </div>
+            </div>
+          )}
+
           {/* Expandable Full 8-Field Environmental Readings */}
-          <div className="rounded-3xl border border-slate-200 bg-white/95 p-5 shadow-sm">
+          <div className="rounded-3xl border border-slate-200 bg-white/95 p-5 shadow-sm dark:border-slate-700 dark:bg-slate-800/95">
             <button
               type="button"
               onClick={() => setShowFullZones((v) => !v)}
               className="flex w-full items-center justify-between text-left"
             >
               <div>
-                <p className="text-sm font-extrabold text-slate-900">
+                <p className="text-sm font-extrabold text-slate-900 dark:text-white">
                   Optional: Enter Full 8-Sensor Walkaround (4 Zones, Humidity, NH₃, CO₂ &amp; Pressure)
                 </p>
-                <p className="text-xs text-slate-500">
+                <p className="text-xs text-slate-500 dark:text-slate-400">
                   Expand to update house control gauges during physical inspection
                 </p>
               </div>
               {showFullZones ? (
-                <ChevronUp className="h-5 w-5 text-slate-600" />
+                <ChevronUp className="h-5 w-5 text-slate-600 dark:text-slate-300" />
               ) : (
-                <ChevronDown className="h-5 w-5 text-slate-600" />
+                <ChevronDown className="h-5 w-5 text-slate-600 dark:text-slate-300" />
               )}
             </button>
 
             {showFullZones && (
-              <div className="mt-4 grid grid-cols-2 gap-3 border-t border-slate-100 pt-4 sm:grid-cols-4">
+              <div className="mt-4 grid grid-cols-2 gap-3 border-t border-slate-100 pt-4 sm:grid-cols-4 dark:border-slate-700">
                 {[
                   ['start', 'Start Zone (°C)', '0.1'],
                   ['middle', 'Middle Zone (°C)', '0.1'],
@@ -1353,7 +1919,7 @@ export default function HealthResourceLog() {
                   ['negativePressurePa', 'Neg. Pressure (Pa)', '1'],
                 ].map(([key, label, stepVal]) => (
                   <div key={key}>
-                    <label className="mb-1 block text-[11px] font-bold text-slate-600 uppercase">
+                    <label className="mb-1 block text-[11px] font-bold text-slate-600 uppercase dark:text-slate-300">
                       {label}
                     </label>
                     <input
@@ -1363,7 +1929,7 @@ export default function HealthResourceLog() {
                       onChange={(e) =>
                         setZones((prev) => ({ ...prev, [key]: Number(e.target.value) }))
                       }
-                      className="w-full rounded-xl border border-slate-300 bg-slate-50 px-3 py-2 text-sm font-bold text-slate-900 focus:border-emerald-700 focus:bg-white focus:outline-none"
+                      className="w-full rounded-xl border border-slate-300 bg-slate-50 px-3 py-2 text-sm font-bold text-slate-900 focus:border-emerald-700 focus:bg-white focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-white"
                     />
                   </div>
                 ))}
@@ -1371,216 +1937,14 @@ export default function HealthResourceLog() {
             )}
           </div>
 
-          {/* Role & House-Aware Feed + Water Section (Weekly Bird Sample Weight REMOVED!) */}
-          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-            {/* Feed Section: Strict Bag vs. Silo Split */}
-            {isSiloHouse ? (
-              <div className="flex flex-col justify-between rounded-3xl border border-indigo-200 bg-indigo-50/70 p-5 shadow-sm dark:border-indigo-800 dark:bg-indigo-950/35">
-                <div>
-                  <div className="flex items-center gap-2">
-                    <Package className="h-5 w-5 text-indigo-700 dark:text-indigo-300" />
-                    <h3 className="text-sm font-extrabold text-indigo-950 dark:text-indigo-200">
-                      Silo-Based House — Bulk feed is managed in Management Silo Refills
-                    </h3>
-                  </div>
-                  <p className="mt-2 text-xs font-medium text-indigo-900/90 dark:text-indigo-300">
-                    This house runs automated auger feeding from its {siloCapacityTons}-Ton bulk silo.
-                    Workers and Supervisors do not enter daily feed bags or tonnage here.
-                  </p>
-
-                  <div className="mt-4 rounded-2xl border border-indigo-200 bg-white/90 p-3.5">
-                    <div className="flex items-center justify-between text-xs font-extrabold text-slate-800">
-                      <span>Current Bulk Silo Level</span>
-                      <span className="text-indigo-700 dark:text-indigo-300">
-                        {(siloCurrentKg / 1000).toFixed(2)} / {siloCapacityTons} T ({siloFillPct}%)
-                      </span>
-                    </div>
-                    <div className="mt-2 h-3 w-full overflow-hidden rounded-full bg-indigo-100 dark:bg-indigo-900">
-                      <div
-                        className="h-full rounded-full bg-indigo-700"
-                        style={{ width: `${siloFillPct}%` }}
-                      />
-                    </div>
-                    {activeHouse.lastSiloRefill && (
-                      <p className="mt-2 text-[11px] font-semibold text-slate-600">
-                        Last Truck Refill: {activeHouse.lastSiloRefill.tonsAdded}T on{' '}
-                        {activeHouse.lastSiloRefill.date}
-                      </p>
-                    )}
-                  </div>
-                </div>
-              </div>
-            ) : (
-              <div className="rounded-3xl border border-slate-200 bg-white/95 p-5 shadow-sm">
-                <div className="flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-2">
-                    <Wheat className="h-5 w-5 text-amber-700" />
-                    <h3 className="text-sm font-extrabold text-slate-900">
-                      Bags Consumed ({bagWeightKg}kg Fixed Bag / جونية)
-                    </h3>
-                  </div>
-                  <select
-                    value={feedPhase}
-                    onChange={(e) => setFeedPhase(e.target.value)}
-                    className="rounded-xl border border-slate-300 bg-slate-50 px-2.5 py-1.5 text-xs font-bold text-slate-900"
-                  >
-                    <option value="Starter">Starter</option>
-                    <option value="Grower">Grower</option>
-                    <option value="Finisher">Finisher</option>
-                  </select>
-                </div>
-
-                {/* Tactile Integer Bag Counter */}
-                <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setBagsConsumed((b) => Math.max(0, Number(b) - 1))}
-                      className="rounded-xl border border-slate-300 bg-slate-50 px-3 py-2.5 text-xs font-extrabold text-slate-800 hover:bg-slate-100"
-                    >
-                      -1
-                    </button>
-                    <input
-                      type="number"
-                      min="0"
-                      step="1"
-                      value={bagsConsumed}
-                      onChange={(e) =>
-                        setBagsConsumed(Math.max(0, Math.round(Number(e.target.value || 0))))
-                      }
-                      className="h-12 w-24 rounded-xl border border-amber-300 bg-amber-50 text-center text-2xl font-black text-amber-900 dark:bg-amber-950/60 dark:text-amber-200"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => setBagsConsumed((b) => Number(b) + 1)}
-                      className="rounded-xl bg-amber-600 px-3 py-2.5 text-xs font-extrabold text-white hover:bg-amber-700"
-                    >
-                      +1
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setBagsConsumed((b) => Number(b) + 2)}
-                      className="rounded-xl bg-amber-600 px-3 py-2.5 text-xs font-extrabold text-white hover:bg-amber-700"
-                    >
-                      +2
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setBagsConsumed((b) => Number(b) + 5)}
-                      className="rounded-xl bg-amber-700 px-3 py-2.5 text-xs font-extrabold text-white hover:bg-amber-800"
-                    >
-                      +5
-                    </button>
-                  </div>
-                </div>
-
-                <div className="mt-3 flex items-center justify-between rounded-2xl bg-amber-50/80 px-3.5 py-2.5 text-xs font-semibold text-amber-950 dark:bg-amber-950/40 dark:text-amber-200">
-                  <span>
-                    Fixed Weight: <strong>{feedBagsInt} × {bagWeightKg}kg = {feedKgComputed} kg</strong>
-                  </span>
-                  <span>
-                    {feedPhase} Stock: <strong>{stockBagsRemaining} Bags</strong>
-                  </span>
-                </div>
-
-                {isManagement && (
-                  <button
-                    type="button"
-                    onClick={() => setShowDeliveryForm((v) => !v)}
-                    className="mt-3 inline-flex w-full items-center justify-center gap-1.5 rounded-xl border border-slate-300 bg-slate-50 py-2 text-xs font-bold text-slate-700 hover:bg-slate-100"
-                  >
-                    <Truck className="h-3.5 w-3.5 text-emerald-700" />
-                    + Log {bagWeightKg}kg Bag Delivery to House Stock
-                  </button>
-                )}
-              </div>
-            )}
-
-            {/* Water Usage Panel — Default Gallons (gal) */}
-            <div className="rounded-3xl border border-slate-200 bg-white/95 p-5 shadow-sm">
-              <div className="flex items-center justify-between gap-2">
-                <div className="flex items-center gap-2">
-                  <Droplets className="h-5 w-5 text-sky-600" />
-                  <h3 className="text-sm font-extrabold text-slate-900">
-                    Daily Water Tank Reading (Gallons Default)
-                  </h3>
-                </div>
-                {isManagement && (
-                  <div className="inline-flex rounded-full bg-slate-100 p-0.5 text-[11px] font-bold">
-                    {[
-                      ['gallons', 'gal'],
-                      ['liters', 'L'],
-                      ['m3', 'm³'],
-                    ].map(([unitKey, label]) => (
-                      <button
-                        key={unitKey}
-                        type="button"
-                        onClick={() => setWaterViewUnit(unitKey)}
-                        className={`rounded-full px-2.5 py-1 ${
-                          waterViewUnit === unitKey ? 'bg-sky-700 text-white' : 'text-slate-600'
-                        }`}
-                      >
-                        {label}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              <div className="mt-4 flex flex-wrap items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => setWaterGallonsInput((g) => Math.max(0, Number(g) - 50))}
-                  className="rounded-xl border border-slate-300 bg-slate-50 px-3 py-2.5 text-xs font-extrabold text-slate-800 hover:bg-slate-100"
-                >
-                  -50 gal
-                </button>
-                <input
-                  type="number"
-                  min="0"
-                  step={waterViewUnit === 'm3' ? '0.1' : '1'}
-                  value={displayedWaterValue}
-                  onChange={(e) => handleWaterDisplayChange(e.target.value)}
-                  className="h-12 w-28 rounded-xl border border-sky-300 bg-sky-50 text-center text-xl font-black text-sky-900 dark:bg-sky-950/60 dark:text-sky-200"
-                />
-                <button
-                  type="button"
-                  onClick={() => setWaterGallonsInput((g) => Number(g) + 50)}
-                  className="rounded-xl bg-sky-600 px-3 py-2.5 text-xs font-extrabold text-white hover:bg-sky-700"
-                >
-                  +50 gal
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setWaterGallonsInput((g) => Number(g) + 100)}
-                  className="rounded-xl bg-sky-700 px-3 py-2.5 text-xs font-extrabold text-white hover:bg-sky-800"
-                >
-                  +100 gal
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setWaterGallonsInput((g) => Number(g) + 500)}
-                  className="rounded-xl bg-sky-800 px-3 py-2.5 text-xs font-extrabold text-white hover:bg-sky-900"
-                >
-                  +500 gal
-                </button>
-              </div>
-
-              <div className="mt-3 rounded-2xl bg-sky-50 px-3.5 py-2.5 text-xs font-semibold text-sky-950 dark:bg-sky-950/40 dark:text-sky-200">
-                Recorded: <strong>{waterGallonsComputed.toLocaleString()} gal</strong> •{' '}
-                {waterLitersComputed.toLocaleString()} L ({waterM3Computed} m³)
-              </div>
-            </div>
-          </div>
-
           {/* Notes & Submit & Lock CTA */}
-          <div className="flex flex-col gap-3 rounded-3xl border border-slate-200 bg-white/95 p-5 shadow-sm sm:flex-row sm:items-center">
+          <div className="flex flex-col gap-3 rounded-3xl border border-slate-200 bg-white/95 p-5 shadow-sm sm:flex-row sm:items-center dark:border-slate-700 dark:bg-slate-800/95">
             <input
               type="text"
               value={note}
               onChange={(e) => setNote(e.target.value)}
               placeholder="Optional shift observations (litter quality, drinker flow, cooling pads)..."
-              className="flex-1 rounded-2xl border border-slate-300 bg-slate-50 px-4 py-3 text-sm text-slate-900 focus:border-emerald-700 focus:bg-white focus:outline-none"
+              className="flex-1 rounded-2xl border border-slate-300 bg-slate-50 px-4 py-3 text-sm text-slate-900 focus:border-emerald-700 focus:bg-white focus:outline-none dark:border-slate-700 dark:bg-slate-900 dark:text-white"
             />
             <button
               type="submit"
@@ -1761,21 +2125,41 @@ export default function HealthResourceLog() {
       )}
 
       {/* Current Shift Locked Entries + Running Subtotals */}
-      <section className="rounded-3xl border border-slate-200 bg-white/95 p-5 shadow-sm">
+      <section className="rounded-3xl border border-slate-200 bg-white/95 p-5 shadow-sm dark:border-slate-700 dark:bg-slate-800/95">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h3 className="flex items-center gap-2 text-base font-extrabold text-slate-900">
-              <Lock className="h-4 w-4 text-emerald-700" />
+            <h3 className="flex items-center gap-2 text-base font-extrabold text-slate-900 dark:text-white">
+              <Lock className="h-4 w-4 text-emerald-700 dark:text-emerald-400" />
               Current Shift Locked Entries — {activeHouse.name} ({activeShiftDate})
             </h3>
-            <p className="text-xs text-slate-500">
+            <p className="text-xs text-slate-500 dark:text-slate-400">
               Submitted entries are locked permanently against tampering.
               {isOwner && manualOverrideEnabled && ' Super Admin Override Edit is ACTIVE.'}
             </p>
           </div>
 
-          {/* Running Shift Subtotals Strip */}
+          {/* Running Shift Subtotals Strip & Contextual Super Admin Override Toggle */}
           <div className="flex flex-wrap items-center gap-2">
+            {isOwner && (
+              <button
+                type="button"
+                onClick={() => setManualOverrideEnabled(!manualOverrideEnabled)}
+                className={`inline-flex items-center gap-1.5 rounded-full border-2 px-3.5 py-1.5 text-xs font-extrabold transition ${
+                  manualOverrideEnabled
+                    ? 'border-amber-500 bg-amber-500 text-white shadow-sm hover:bg-amber-600'
+                    : 'border-amber-400 bg-amber-50 text-amber-900 hover:bg-amber-100 dark:border-amber-700 dark:bg-amber-950/60 dark:text-amber-200 dark:hover:bg-amber-900/60'
+                }`}
+              >
+                {manualOverrideEnabled ? (
+                  <Unlock className="h-3.5 w-3.5" />
+                ) : (
+                  <ShieldCheck className="h-3.5 w-3.5" />
+                )}
+                {manualOverrideEnabled
+                  ? 'Super Admin: Lock Entries (Override Active)'
+                  : 'Super Admin: Unlock Entries for Override Edit'}
+              </button>
+            )}
             {!isSiloHouse && (
               <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-extrabold text-amber-900 dark:bg-amber-950 dark:text-amber-200">
                 Total Bags Today: {shiftSubtotals.bags} ({shiftSubtotals.bags * bagWeightKg} kg)
@@ -1809,7 +2193,7 @@ export default function HealthResourceLog() {
                   {isOwner && manualOverrideEnabled && <th className="py-2 text-right">Override</th>}
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100">
+              <tbody className="divide-y divide-slate-100 dark:divide-slate-700/70">
                 {currentShiftLogs.map((log) => {
                   const gal =
                     log.waterGallons !== undefined
@@ -1826,7 +2210,7 @@ export default function HealthResourceLog() {
                   const isEditingThis = editingLogId === log.id;
 
                   return (
-                    <tr key={log.id} className="hover:bg-slate-50/80">
+                    <tr key={log.id} className="hover:bg-slate-50/80 dark:hover:bg-slate-800/70">
                       <td className="py-2.5 pr-3">
                         <div className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-extrabold text-slate-700">
                           <Lock className="h-3 w-3 text-emerald-700" />

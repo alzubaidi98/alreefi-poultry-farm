@@ -1,26 +1,31 @@
-import { createContext, useContext, useEffect, useMemo, useState } from 'react';
+import { createContext, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertTriangle,
   BarChart3,
   BatteryFull,
-  Building2,
+  Calendar,
+  Check,
   ChevronDown,
+  ChevronRight,
   ChevronUp,
   ClipboardCheck,
   Clock,
-  FileSpreadsheet,
   Languages,
+  Layers,
   LayoutDashboard,
+  LayoutGrid,
   Lock,
   LogIn,
   LogOut,
+  Menu,
   Monitor,
   Moon,
+  PanelLeft,
+  PanelLeftClose,
+  PanelLeftOpen,
   Play,
   RotateCw,
   Settings,
-  ShieldAlert,
-  ShieldCheck,
   Signal,
   Sprout,
   Stethoscope,
@@ -46,6 +51,7 @@ import {
   createInitialFarmState,
   deriveWorkerProfiles,
   detectActiveShiftForTimestamp,
+  evaluateHouseEnvironmentStatus,
   gallonsToLiters,
   generateNextJobNumber,
   litersToGallons,
@@ -65,11 +71,138 @@ import WeightsAndReports from './components/WeightsAndReports.jsx';
 
 const FarmContext = createContext(null);
 const THEME_STORAGE_KEY = 'alreefi_theme_mode';
+const LAYOUT_STORAGE_KEY = 'alreefi_layout_mode';
 
 export function useFarm() {
   const ctx = useContext(FarmContext);
   if (!ctx) throw new Error('useFarm must be used inside FarmProvider');
   return ctx;
+}
+
+function BroilerHouseSvgIcon({ isSilo = false, className = 'h-7 w-7' }) {
+  return (
+    <svg
+      viewBox="0 0 64 64"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      className={className}
+      aria-hidden="true"
+    >
+      {/* Ridge Roof Vent Cupola */}
+      <rect x="26" y="8" width="12" height="6" rx="1.5" fill="currentColor" fillOpacity="0.22" stroke="currentColor" strokeWidth="2.2" />
+      <path d="M24 9L32 4L40 9" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+
+      {/* Main Gable Barn Roof & Silhouette */}
+      <path
+        d="M6 28L32 13L58 28"
+        stroke="currentColor"
+        strokeWidth="2.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M11 26V52H53V26L32 14L11 26Z"
+        fill="currentColor"
+        fillOpacity="0.12"
+        stroke="currentColor"
+        strokeWidth="2.4"
+        strokeLinejoin="round"
+      />
+
+      {/* Double Barn Bay Doors */}
+      <rect x="24" y="36" width="16" height="16" rx="1.5" fill="currentColor" fillOpacity="0.18" stroke="currentColor" strokeWidth="2" />
+      <line x1="32" y1="36" x2="32" y2="52" stroke="currentColor" strokeWidth="1.8" />
+
+      {/* Ventilation Louvers (Left & Right) */}
+      <line x1="15" y1="33" x2="21" y2="33" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+      <line x1="15" y1="37" x2="21" y2="37" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+      <line x1="15" y1="41" x2="21" y2="41" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+      <line x1="43" y1="33" x2="49" y2="33" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+      <line x1="43" y1="37" x2="49" y2="37" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+      <line x1="43" y1="41" x2="49" y2="41" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+
+      {/* Ground Line */}
+      <line x1="6" y1="52" x2="58" y2="52" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" />
+
+      {/* Optional Silo Tank Silhouette */}
+      {isSilo && (
+        <>
+          <path d="M53 26H59V46L56 50L53 46V26Z" fill="currentColor" fillOpacity="0.28" stroke="currentColor" strokeWidth="1.8" strokeLinejoin="round" />
+          <path d="M53 26L56 21L59 26" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+        </>
+      )}
+    </svg>
+  );
+}
+
+function LiveClockDateBadge({ nowClock, activeLangCode, className = '' }) {
+  const timeText = nowClock.toLocaleTimeString('en-GB', {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  });
+  const dateText = nowClock.toLocaleDateString(activeLangCode === 'ar' ? 'ar-AE' : 'en-AE', {
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  });
+
+  return (
+    <div
+      className={`inline-flex max-w-full min-w-0 flex-wrap items-center gap-x-2.5 gap-y-1 rounded-xl border border-emerald-200 bg-emerald-50/90 px-3 py-1.5 shadow-xs dark:border-emerald-800/80 dark:bg-emerald-950/70 ${className}`}
+      aria-label="Live farm clock and date"
+    >
+      <span className="inline-flex items-center gap-1.5 font-mono text-xs font-black tracking-tight whitespace-nowrap text-emerald-950 tabular-nums sm:text-sm dark:text-emerald-200">
+        <Clock className="h-3.5 w-3.5 shrink-0 text-emerald-700 dark:text-emerald-400" />
+        <span>{timeText}</span>
+      </span>
+      <span className="hidden h-3.5 w-px bg-emerald-300/90 sm:inline-block dark:bg-emerald-700/80" />
+      <span className="inline-flex items-center gap-1.5 text-[11px] font-bold whitespace-nowrap text-slate-700 sm:text-xs dark:text-slate-200">
+        <Calendar className="h-3.5 w-3.5 shrink-0 text-emerald-700 dark:text-emerald-400" />
+        <span>{dateText}</span>
+      </span>
+    </div>
+  );
+}
+
+function LayoutModeSwitcher({ layoutMode, setLayoutMode }) {
+  const options = [
+    { id: 'sidebar', label: 'Sidebar', icon: PanelLeft },
+    { id: 'dropdown', label: 'Dropdowns', icon: Layers },
+    { id: 'topbar', label: 'Top Bar', icon: LayoutGrid },
+  ];
+
+  return (
+    <div
+      className="inline-flex max-w-full flex-wrap items-center rounded-full border border-slate-200 bg-slate-100 p-0.5 dark:border-slate-700 dark:bg-slate-800"
+      role="group"
+      aria-label="Layout style"
+    >
+      {options.map((opt) => {
+        const Icon = opt.icon;
+        const active = layoutMode === opt.id;
+        return (
+          <button
+            key={opt.id}
+            type="button"
+            onClick={() => setLayoutMode(opt.id)}
+            title={`Switch to ${opt.label} layout`}
+            aria-label={`Switch to ${opt.label} layout`}
+            aria-pressed={active}
+            className={`inline-flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-extrabold transition ${
+              active
+                ? 'bg-white text-emerald-900 shadow-sm dark:bg-emerald-600 dark:text-white'
+                : 'text-slate-600 hover:text-slate-900 dark:text-slate-300 dark:hover:text-white'
+            }`}
+          >
+            <Icon className="h-3.5 w-3.5 shrink-0" />
+            <span className="hidden sm:inline">{opt.label}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
 }
 
 function getSystemPrefersDark() {
@@ -204,7 +337,7 @@ export default function App() {
   const [toast, setToast] = useState(null);
   const [nowClock, setNowClock] = useState(() => new Date());
 
-  // Theme Mode ('light' | 'dark' | 'system') & Tablet Preview ('false' | 'landscape' | 'portrait')
+  // Theme Mode ('light' | 'dark' | 'system'), Layout Mode ('sidebar' | 'dropdown' | 'topbar') & Tablet Preview
   const [themeMode, setThemeMode] = useState(() => {
     try {
       const saved = window.localStorage.getItem(THEME_STORAGE_KEY);
@@ -214,6 +347,23 @@ export default function App() {
     }
     return 'light';
   });
+  const [layoutMode, setLayoutMode] = useState(() => {
+    try {
+      const saved = window.localStorage.getItem(LAYOUT_STORAGE_KEY);
+      if (saved === 'sidebar' || saved === 'dropdown' || saved === 'topbar') return saved;
+    } catch {
+      // Ignore storage failures
+    }
+    return 'sidebar';
+  });
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+  const [sidebarHousesOpen, setSidebarHousesOpen] = useState(true);
+  const [openDropdownId, setOpenDropdownId] = useState(null);
+  const [headerHeight, setHeaderHeight] = useState(72);
+  const headerRef = useRef(null);
+  const dropdownContainerRef = useRef(null);
+
   const [systemDark, setSystemDark] = useState(getSystemPrefersDark);
   const [tabletPreviewMode, setTabletPreviewMode] = useState(false);
 
@@ -226,6 +376,54 @@ export default function App() {
       // Ignore storage errors
     }
   }, [themeMode]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(LAYOUT_STORAGE_KEY, layoutMode);
+    } catch {
+      // Ignore storage errors
+    }
+    setOpenDropdownId(null);
+    setMobileSidebarOpen(false);
+  }, [layoutMode]);
+
+  useEffect(() => {
+    const el = headerRef.current;
+    if (!el || typeof window === 'undefined') return undefined;
+    const updateHeight = () => setHeaderHeight(Math.round(el.getBoundingClientRect().height) || 72);
+    updateHeight();
+    if (typeof window.ResizeObserver !== 'undefined') {
+      const ro = new window.ResizeObserver(updateHeight);
+      ro.observe(el);
+      return () => ro.disconnect();
+    }
+    window.addEventListener('resize', updateHeight);
+    return () => window.removeEventListener('resize', updateHeight);
+  }, [userRole, activeUserId, layoutMode, tabletPreviewMode, activeView]);
+
+  useEffect(() => {
+    const handlePointerDown = (e) => {
+      if (
+        openDropdownId &&
+        dropdownContainerRef.current &&
+        !dropdownContainerRef.current.contains(e.target)
+      ) {
+        setOpenDropdownId(null);
+      }
+    };
+    const handleKeyDown = (e) => {
+      if (e.key === 'Escape') {
+        setOpenDropdownId(null);
+        setMobileSidebarOpen(false);
+      }
+    };
+    window.addEventListener('pointerdown', handlePointerDown);
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('pointerdown', handlePointerDown);
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [openDropdownId]);
 
   useEffect(() => {
     if (typeof window === 'undefined' || !window.matchMedia) return undefined;
@@ -351,12 +549,16 @@ export default function App() {
   const navigateTo = (view, houseId) => {
     if (houseId) setSelectedHouseId(houseId);
     setActiveView(view);
+    setOpenDropdownId(null);
+    setMobileSidebarOpen(false);
   };
 
   const completeSignInForAccount = (account) => {
     setUserRole(account.role);
     setActiveUserId(account.id);
     setManualOverrideEnabled(false);
+    setOpenDropdownId(null);
+    setMobileSidebarOpen(false);
     setLoginError('');
 
     const nonArchivedActive = (state.houses || []).filter(
@@ -402,6 +604,8 @@ export default function App() {
     setUserRole(null);
     setActiveUserId(null);
     setManualOverrideEnabled(false);
+    setOpenDropdownId(null);
+    setMobileSidebarOpen(false);
     setLoginError('');
   };
 
@@ -1100,8 +1304,8 @@ export default function App() {
   };
 
   const updateLockedHealthLog = (arg1, arg2) => {
-    if (userRole !== 'owner' || !manualOverrideEnabled) {
-      notify('Super Admin Override Mode must be ON to edit locked entries.', 'error');
+    if (userRole !== 'owner') {
+      notify('Only Super Admin can edit locked entries.', 'error');
       return;
     }
     const logId = typeof arg1 === 'object' ? arg1.logId : arg1;
@@ -2271,6 +2475,8 @@ export default function App() {
     themeMode,
     setThemeMode,
     resolvedTheme,
+    layoutMode,
+    setLayoutMode,
     tabletPreviewMode,
     setTabletPreviewMode,
     activeLangCode,
@@ -2563,15 +2769,18 @@ export default function App() {
         >
           <div className="app-bg-pattern flex min-h-screen flex-col justify-between p-4 sm:p-8">
             {/* Top Control Bar */}
-            <div className="mx-auto flex w-full max-w-2xl flex-wrap items-center justify-between gap-2 rounded-2xl border border-emerald-900/10 bg-white/95 px-4 py-2.5 shadow-sm backdrop-blur-md dark:border-slate-700 dark:bg-slate-800/95">
-              <div className="flex items-center gap-2">
-                <img src="/app-logo.png" alt="AlReefi" className="h-8 w-8 rounded-lg object-contain" />
-                <div>
-                  <p className="text-xs font-black text-slate-900 dark:text-white">{activeUser.name}</p>
-                  <p className="text-[11px] font-bold text-emerald-700 dark:text-emerald-400">
-                    {activeUser.roleTitle}
+            <div className="mx-auto flex w-full max-w-3xl flex-wrap items-center justify-between gap-2.5 rounded-2xl border border-emerald-900/10 bg-white/95 px-4 py-2.5 shadow-sm backdrop-blur-md dark:border-slate-700 dark:bg-slate-800/95">
+              <div className="flex min-w-0 flex-wrap items-center gap-2.5">
+                <img src="/app-logo.png" alt="AlReefi" className="h-9 w-9 shrink-0 rounded-xl object-contain" />
+                <div className="min-w-0">
+                  <p className="text-sm font-black tracking-tight text-emerald-950 dark:text-emerald-300">
+                    {langDict.appTitle}
+                  </p>
+                  <p className="text-[11px] font-bold text-slate-600 dark:text-slate-300">
+                    {activeUser.name} • <span className="text-emerald-700 dark:text-emerald-400">{activeUser.roleTitle}</span>
                   </p>
                 </div>
+                <LiveClockDateBadge nowClock={nowClock} activeLangCode={activeLangCode} />
               </div>
 
               <div className="flex flex-wrap items-center gap-2">
@@ -2604,7 +2813,7 @@ export default function App() {
             </div>
 
             {/* Center High-Contrast Clock-In Gate */}
-            <div className="mx-auto my-6 w-full max-w-2xl rounded-[2rem] border border-emerald-900/15 bg-white/95 p-6 text-center shadow-2xl backdrop-blur-md sm:p-10 dark:border-slate-700 dark:bg-slate-800/95">
+            <div className="mx-auto my-6 w-full max-w-3xl rounded-[2rem] border border-emerald-900/15 bg-white/95 p-6 text-center shadow-2xl backdrop-blur-md sm:p-10 dark:border-slate-700 dark:bg-slate-800/95">
               <div className="mx-auto inline-flex items-center gap-2 rounded-full bg-amber-100 px-4 py-1.5 text-xs font-extrabold text-amber-900 dark:bg-amber-900/40 dark:text-amber-300">
                 <Lock className="h-3.5 w-3.5" />
                 Shift Attendance Gate • Clock-In Required
@@ -2620,7 +2829,7 @@ export default function App() {
               {/* Live Ticking UAE Clock */}
               <div className="mt-6 rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-900">
                 <div className="flex items-center justify-center gap-2 text-xs font-bold text-slate-500 uppercase dark:text-slate-400">
-                  <Clock className="h-4 w-4 text-emerald-700 dark:text-emerald-400" />
+                  <Calendar className="h-4 w-4 text-emerald-700 dark:text-emerald-400" />
                   <span>
                     {nowClock.toLocaleDateString('en-AE', {
                       weekday: 'long',
@@ -2630,7 +2839,7 @@ export default function App() {
                     })}
                   </span>
                 </div>
-                <p className="mt-1 font-mono text-3xl font-black tracking-tight text-emerald-900 sm:text-4xl dark:text-emerald-400">
+                <p className="mt-1 font-mono text-3xl font-black tracking-tight text-emerald-900 tabular-nums sm:text-4xl dark:text-emerald-400">
                   {nowClock.toLocaleTimeString('en-GB', {
                     hour: '2-digit',
                     minute: '2-digit',
@@ -2642,39 +2851,86 @@ export default function App() {
                 </p>
               </div>
 
-              {/* Assigned Houses List */}
+              {/* Visual Assigned Broiler Houses Cards */}
               <div className="mt-6 text-left">
-                <p className="mb-2.5 text-xs font-extrabold tracking-wide text-slate-500 uppercase dark:text-slate-400">
+                <p className="mb-3 text-xs font-extrabold tracking-wide text-slate-500 uppercase dark:text-slate-400">
                   Your Assigned Broiler Houses ({assignedHouses.length})
                 </p>
-                <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
+                <div className="grid grid-cols-1 gap-3.5 sm:grid-cols-2">
                   {assignedHouses.map((h) => {
                     const isSilo = h.feedSystemType === 'silo';
+                    const isCleaning = h.phase === 'cleaning';
+                    const env = evaluateHouseEnvironmentStatus(h, state.settings);
+                    const inv = calculateHouseInventory(
+                      h,
+                      state.settings?.contractRules?.chicksPerCarton || 100,
+                      state.healthLogs || []
+                    );
+                    const statusBadgeClass =
+                      env.status === 'ALERT'
+                        ? 'bg-red-100 text-red-800 dark:bg-red-900/40 dark:text-red-300'
+                        : env.status === 'ATTENTION'
+                        ? 'bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300'
+                        : env.status === 'CLEANING'
+                        ? 'bg-sky-100 text-sky-800 dark:bg-sky-900/40 dark:text-sky-300'
+                        : 'bg-emerald-100 text-emerald-900 dark:bg-emerald-900/50 dark:text-emerald-300';
+
                     return (
                       <div
                         key={h.id}
-                        className="flex items-center justify-between rounded-2xl border border-slate-200 bg-white p-3.5 shadow-sm dark:border-slate-700 dark:bg-slate-900"
+                        className="flex flex-col justify-between gap-3 rounded-2xl border-2 border-slate-200 bg-white p-4 shadow-sm transition hover:border-emerald-300 dark:border-slate-700 dark:bg-slate-900 dark:hover:border-emerald-700"
                       >
-                        <div className="flex items-center gap-2.5">
-                          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-emerald-100 text-emerald-900 dark:bg-emerald-900/50 dark:text-emerald-300">
-                            <Building2 className="h-5 w-5" />
+                        <div className="flex items-start gap-3">
+                          <div
+                            className={`flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl border ${
+                              isCleaning
+                                ? 'border-sky-200 bg-sky-50 text-sky-700 dark:border-sky-800 dark:bg-sky-950/60 dark:text-sky-300'
+                                : isSilo
+                                ? 'border-indigo-200 bg-indigo-50 text-indigo-800 dark:border-indigo-800 dark:bg-indigo-950/60 dark:text-indigo-300'
+                                : 'border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300'
+                            }`}
+                          >
+                            <BroilerHouseSvgIcon isSilo={isSilo} className="h-9 w-9" />
                           </div>
-                          <div>
-                            <p className="text-sm font-black text-slate-900 dark:text-white">{h.name}</p>
-                            <p className="text-[11px] font-semibold text-slate-500 dark:text-slate-400">
-                              {h.sector} • {h.phase === 'cleaning' ? `Cleaning Day ${h.cleaningDay}` : `Day ${h.cycleDay}/${h.targetCycleDays}`}
+
+                          <div className="min-w-0 flex-1">
+                            <div className="flex flex-wrap items-center justify-between gap-1.5">
+                              <p className="text-base font-black text-slate-900 dark:text-white">
+                                {h.name}
+                              </p>
+                              <span className={`rounded-full px-2 py-0.5 text-[10px] font-black uppercase ${statusBadgeClass}`}>
+                                {env.status}
+                              </span>
+                            </div>
+                            <p className="mt-0.5 text-xs font-semibold text-slate-500 dark:text-slate-400">
+                              {h.sector} • House #{h.code || '01'}
                             </p>
                           </div>
                         </div>
-                        <span
-                          className={`rounded-full px-2.5 py-1 text-[10px] font-extrabold ${
-                            isSilo
-                              ? 'bg-indigo-100 text-indigo-900 dark:bg-indigo-900/40 dark:text-indigo-300'
-                              : 'bg-amber-100 text-amber-900 dark:bg-amber-900/40 dark:text-amber-300'
-                          }`}
-                        >
-                          {isSilo ? 'Silo-Based' : 'Bag-Based'}
-                        </span>
+
+                        <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-100 pt-2.5 dark:border-slate-800">
+                          <div className="flex flex-wrap items-center gap-1.5">
+                            <span className="rounded-lg bg-slate-100 px-2.5 py-1 text-[11px] font-extrabold text-slate-800 dark:bg-slate-800 dark:text-slate-200">
+                              {isCleaning
+                                ? `Cleaning Day ${h.cleaningDay || 1}`
+                                : `Day ${h.cycleDay || 1}/${h.targetCycleDays || 35}`}
+                            </span>
+                            {!isCleaning && (
+                              <span className="rounded-lg bg-emerald-50 px-2.5 py-1 text-[11px] font-extrabold text-emerald-800 dark:bg-emerald-950/50 dark:text-emerald-300">
+                                {inv.activeChicks.toLocaleString()} Birds
+                              </span>
+                            )}
+                          </div>
+                          <span
+                            className={`rounded-full px-2.5 py-1 text-[10px] font-black ${
+                              isSilo
+                                ? 'bg-indigo-100 text-indigo-900 dark:bg-indigo-900/40 dark:text-indigo-300'
+                                : 'bg-amber-100 text-amber-900 dark:bg-amber-900/40 dark:text-amber-300'
+                            }`}
+                          >
+                            {isSilo ? `Silo • ${h.siloCapacityTons || 20}T` : `Bags • ${h.bagWeightKg || 50}kg`}
+                          </span>
+                        </div>
                       </div>
                     );
                   })}
@@ -2712,7 +2968,7 @@ export default function App() {
     },
     {
       id: 'house',
-      label: langDict.houses,
+      label: activeLangCode === 'ar' ? langDict.houses : 'Broiler Houses',
       icon: Warehouse,
       roles: ['owner', 'manager'],
     },
@@ -2830,12 +3086,6 @@ export default function App() {
       : 0;
 
     return {
-      dateTimeLabel: new Date().toLocaleString(undefined, {
-        month: 'short',
-        day: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit',
-      }),
       activeCycleNum,
       flockAgeLabel,
       liveBirds,
@@ -2851,62 +3101,418 @@ export default function App() {
     ? activeView
     : navItems[0]?.id || 'log';
 
+  const navItemMap = Object.fromEntries(navItems.map((item) => [item.id, item]));
+  const canViewHouseDashboard = userRole === 'owner' || userRole === 'manager';
+  const isPortraitPreview = tabletPreviewMode === 'portrait';
+
+  const getHouseStatusMeta = (house) => {
+    const env = evaluateHouseEnvironmentStatus(house, state.settings);
+    const dotClass =
+      env.status === 'ALERT'
+        ? 'bg-red-500 ring-2 ring-red-200 dark:ring-red-900/60'
+        : env.status === 'ATTENTION'
+        ? 'bg-amber-500 ring-2 ring-amber-200 dark:ring-amber-900/60'
+        : env.status === 'CLEANING'
+        ? 'bg-sky-500 ring-2 ring-sky-200 dark:ring-sky-900/60'
+        : env.status === 'INACTIVE'
+        ? 'bg-slate-400'
+        : 'bg-emerald-500 ring-2 ring-emerald-200 dark:ring-emerald-900/60';
+    const phaseText =
+      house.isActive === false
+        ? 'Inactive'
+        : house.phase === 'cleaning'
+        ? `Cleaning D${house.cleaningDay || 1}`
+        : `Day ${house.cycleDay || 1}/${house.targetCycleDays || 35}`;
+    const isSilo = house.feedSystemType === 'silo';
+    const feedBadge = isSilo
+      ? `${house.siloCapacityTons || 20}T Silo`
+      : `${house.bagWeightKg || 50}kg Bags`;
+    const shortFeedBadge = isSilo ? `${house.siloCapacityTons || 20}T` : `${house.bagWeightKg || 50}kg`;
+    return { env, dotClass, phaseText, isSilo, feedBadge, shortFeedBadge };
+  };
+
+  const handleQuickJumpHouse = (houseId, preferredView = null) => {
+    const targetView = canViewHouseDashboard
+      ? preferredView || (currentNavView === 'log' ? 'log' : 'house')
+      : 'log';
+    navigateTo(targetView, houseId);
+  };
+
+  const sidebarSections = [
+    {
+      id: 'overview',
+      title: 'Overview & Houses',
+      items: [navItemMap.hub, navItemMap.house, navItemMap.log].filter(Boolean),
+      showHouseQuickJump: true,
+    },
+    {
+      id: 'operations',
+      title: 'Operations & Workflow',
+      items: [navItemMap.tasks, navItemMap.staff].filter(Boolean),
+    },
+    {
+      id: 'finance',
+      title: 'Finance, Weights & Analytics',
+      items: [navItemMap.orders, navItemMap.weights, navItemMap.analytics].filter(Boolean),
+    },
+    {
+      id: 'system',
+      title: 'System',
+      items: [navItemMap.settings, navItemMap.crops].filter(Boolean),
+    },
+  ].filter((sec) => sec.items.length > 0);
+
+  const dropdownMenus = [
+    {
+      id: 'ops',
+      label: 'Operations & Barn Logs',
+      icon: Warehouse,
+      type: 'nav',
+      items: [navItemMap.hub, navItemMap.house, navItemMap.log, navItemMap.tasks].filter(Boolean),
+    },
+    {
+      id: 'houses',
+      label: 'Quick House Jump',
+      icon: BroilerHouseSvgIcon,
+      type: 'houses',
+      items: [],
+    },
+    {
+      id: 'finance',
+      label: 'Finance & Analytics',
+      icon: BarChart3,
+      type: 'nav',
+      items: [navItemMap.orders, navItemMap.weights, navItemMap.analytics].filter(Boolean),
+    },
+    {
+      id: 'admin',
+      label: 'Admin & Settings',
+      icon: Settings,
+      type: 'nav',
+      items: [navItemMap.staff, navItemMap.settings, navItemMap.crops].filter(Boolean),
+    },
+  ].filter((m) => m.type === 'houses' || m.items.length > 0);
+
+  const userInitials = String(activeUser?.name || actorName || 'AR')
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase() || '')
+    .join('');
+  const isUserOnShift =
+    activeUser.onShift || userRole === 'owner' || userRole === 'manager';
+
+  const renderHouseQuickJumpList = (compactRail = false) => {
+    if (compactRail) {
+      return (
+        <div className="space-y-1 pt-1">
+          {visibleHouses.map((h) => {
+            const meta = getHouseStatusMeta(h);
+            const active =
+              selectedHouseId === h.id &&
+              (currentNavView === 'house' || currentNavView === 'log');
+            return (
+              <button
+                key={h.id}
+                type="button"
+                onClick={() => handleQuickJumpHouse(h.id, canViewHouseDashboard ? 'house' : 'log')}
+                title={`${h.name} • ${meta.phaseText} • ${meta.feedBadge}`}
+                className={`relative mx-auto flex h-10 w-12 items-center justify-center rounded-xl border text-[11px] font-black transition ${
+                  active
+                    ? 'border-emerald-600 bg-emerald-50 text-emerald-900 dark:border-emerald-500 dark:bg-emerald-950/60 dark:text-emerald-200'
+                    : 'border-slate-200 bg-white text-slate-700 hover:bg-emerald-50 dark:border-slate-800 dark:bg-slate-900 dark:text-slate-300 dark:hover:bg-slate-800'
+                }`}
+              >
+                <span className={`absolute top-1.5 right-1.5 h-2 w-2 rounded-full ${meta.dotClass}`} />
+                <BroilerHouseSvgIcon isSilo={meta.isSilo} className="h-5 w-5" />
+              </button>
+            );
+          })}
+        </div>
+      );
+    }
+
+    return (
+      <div className="ms-2 border-s-2 border-emerald-200/80 ps-2.5 pt-1 pb-1.5 dark:border-emerald-900/70">
+        <button
+          type="button"
+          onClick={() => setSidebarHousesOpen((prev) => !prev)}
+          className="mb-1 flex w-full items-center justify-between rounded-lg px-2 py-1 text-[11px] font-extrabold tracking-wide text-slate-500 uppercase transition hover:bg-slate-100 hover:text-slate-800 dark:text-slate-400 dark:hover:bg-slate-800 dark:hover:text-slate-200"
+        >
+          <span>Quick-Jump Houses ({visibleHouses.length})</span>
+          {sidebarHousesOpen ? (
+            <ChevronDown className="h-3.5 w-3.5" />
+          ) : (
+            <ChevronRight className="h-3.5 w-3.5" />
+          )}
+        </button>
+
+        {sidebarHousesOpen && (
+          <div className="space-y-1">
+            {visibleHouses.map((h) => {
+              const meta = getHouseStatusMeta(h);
+              const active =
+                selectedHouseId === h.id &&
+                (currentNavView === 'house' || currentNavView === 'log');
+              return (
+                <button
+                  key={h.id}
+                  type="button"
+                  onClick={() => handleQuickJumpHouse(h.id, canViewHouseDashboard ? 'house' : 'log')}
+                  className={`flex w-full items-center gap-2 rounded-xl px-2.5 py-1.5 text-left transition ${
+                    active
+                      ? 'bg-emerald-100/90 text-emerald-950 ring-1 ring-emerald-300 dark:bg-emerald-900/50 dark:text-emerald-100 dark:ring-emerald-700'
+                      : 'text-slate-700 hover:bg-slate-100 dark:text-slate-300 dark:hover:bg-slate-800/80'
+                  }`}
+                >
+                  <div className="relative flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-white text-emerald-800 ring-1 ring-slate-200 dark:bg-slate-800 dark:text-emerald-300 dark:ring-slate-700">
+                    <BroilerHouseSvgIcon isSilo={meta.isSilo} className="h-4 w-4" />
+                    <span
+                      className={`absolute -top-0.5 -right-0.5 h-2 w-2 rounded-full ${meta.dotClass}`}
+                    />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-xs font-extrabold">{h.name}</p>
+                    <p className="truncate text-[10px] font-semibold text-slate-500 dark:text-slate-400">
+                      {meta.phaseText}
+                    </p>
+                  </div>
+                  <span
+                    className={`shrink-0 rounded-md px-1.5 py-0.5 text-[9px] font-black ${
+                      meta.isSilo
+                        ? 'bg-indigo-100 text-indigo-800 dark:bg-indigo-950/70 dark:text-indigo-300'
+                        : 'bg-amber-100 text-amber-800 dark:bg-amber-950/70 dark:text-amber-300'
+                    }`}
+                  >
+                    {meta.shortFeedBadge}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        )}
+      </div>
+    );
+  };
+
+  const renderSidebarPanel = ({ isDrawer = false } = {}) => {
+    const compact = !isDrawer && sidebarCollapsed;
+
+    return (
+      <div className="flex h-full flex-col">
+        {/* Sidebar Header / Collapse Toggle */}
+        <div className="flex items-center justify-between border-b border-slate-200/80 px-3 py-2.5 dark:border-slate-800">
+          {!compact && (
+            <span className="text-[11px] font-black tracking-wider text-slate-500 uppercase dark:text-slate-400">
+              Farm Navigation
+            </span>
+          )}
+          {isDrawer ? (
+            <button
+              type="button"
+              onClick={() => setMobileSidebarOpen(false)}
+              className="inline-flex items-center gap-1 rounded-lg border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-extrabold text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200"
+              aria-label="Close navigation menu"
+            >
+              <X className="h-4 w-4" />
+              Close
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setSidebarCollapsed((prev) => !prev)}
+              title={compact ? 'Expand sidebar' : 'Collapse sidebar to icon rail'}
+              aria-label={compact ? 'Expand sidebar' : 'Collapse sidebar'}
+              className="mx-auto inline-flex items-center justify-center rounded-lg border border-slate-200 bg-slate-50 p-1.5 text-slate-600 transition hover:bg-emerald-50 hover:text-emerald-900 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-300 dark:hover:bg-slate-700"
+            >
+              {compact ? (
+                <PanelLeftOpen className="h-4 w-4" />
+              ) : (
+                <PanelLeftClose className="h-4 w-4" />
+              )}
+            </button>
+          )}
+        </div>
+
+        {/* Navigation Sections */}
+        <div className="custom-scrollbar flex-1 space-y-4 overflow-y-auto px-2.5 py-3">
+          {sidebarSections.map((section) => (
+            <div key={section.id} className="space-y-1">
+              {!compact ? (
+                <p className="px-2.5 pb-1 text-[10px] font-black tracking-wider text-slate-400 uppercase dark:text-slate-500">
+                  {section.title}
+                </p>
+              ) : (
+                <div className="mx-3 my-1 border-t border-slate-200 dark:border-slate-800" />
+              )}
+
+              {section.items.map((item) => {
+                const Icon = item.icon;
+                const active = currentNavView === item.id;
+                const isHouseTab = item.id === 'house';
+                return (
+                  <div key={item.id} className="space-y-1">
+                    <div className="flex items-center gap-1">
+                      <button
+                        type="button"
+                        onClick={() => navigateTo(item.id)}
+                        title={compact ? item.label : undefined}
+                        aria-current={active ? 'page' : undefined}
+                        className={`flex flex-1 items-center rounded-xl text-xs font-extrabold transition ${
+                          compact ? 'justify-center px-2 py-2.5' : 'gap-2.5 px-3 py-2.5'
+                        } ${
+                          active
+                            ? 'bg-emerald-800 text-white shadow-sm dark:bg-emerald-600'
+                            : 'text-slate-700 hover:bg-emerald-50 hover:text-emerald-950 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white'
+                        }`}
+                      >
+                        <Icon className="h-4 w-4 shrink-0" />
+                        {!compact && <span className="truncate">{item.label}</span>}
+                      </button>
+
+                      {!compact && isHouseTab && (
+                        <button
+                          type="button"
+                          onClick={() => setSidebarHousesOpen((prev) => !prev)}
+                          title="Toggle Broiler Houses quick-jump sub-menu"
+                          className="rounded-lg p-1.5 text-slate-500 hover:bg-slate-100 hover:text-slate-800 dark:text-slate-400 dark:hover:bg-slate-800"
+                        >
+                          {sidebarHousesOpen ? (
+                            <ChevronDown className="h-4 w-4" />
+                          ) : (
+                            <ChevronRight className="h-4 w-4" />
+                          )}
+                        </button>
+                      )}
+                    </div>
+
+                    {isHouseTab && renderHouseQuickJumpList(compact)}
+                  </div>
+                );
+              })}
+
+              {/* For Supervisor / Worker (no 'house' tab), show collapsible Broiler Houses sub-menu in Overview */}
+              {section.showHouseQuickJump && !navItemMap.house && renderHouseQuickJumpList(compact)}
+            </div>
+          ))}
+        </div>
+
+        {/* Active User + Role + On-Shift Footer Card */}
+        <div className="border-t border-slate-200/80 p-2.5 dark:border-slate-800">
+          {compact ? (
+            <div
+              title={`${activeUser.name} (${activeUser.roleTitle}) • ${isUserOnShift ? 'On Shift' : 'Off Shift'}`}
+              className="relative mx-auto flex h-11 w-11 items-center justify-center rounded-2xl bg-emerald-800 text-xs font-black text-white shadow-sm dark:bg-emerald-700"
+            >
+              {userInitials}
+              <span
+                className={`absolute -top-0.5 -right-0.5 h-3 w-3 rounded-full border-2 border-white dark:border-slate-900 ${
+                  isUserOnShift ? 'bg-emerald-400' : 'bg-amber-400'
+                }`}
+              />
+            </div>
+          ) : (
+            <div className="rounded-2xl border border-slate-200 bg-slate-50/90 p-3 dark:border-slate-700 dark:bg-slate-800/80">
+              <div className="flex items-center gap-2.5">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-emerald-800 text-xs font-black text-white dark:bg-emerald-600">
+                  {userInitials}
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-xs font-black text-slate-900 dark:text-white">
+                    {activeUser.name}
+                  </p>
+                  <p className="truncate text-[11px] font-bold text-emerald-700 dark:text-emerald-400">
+                    {activeUser.roleTitle}
+                  </p>
+                </div>
+              </div>
+              <div className="mt-2.5 flex flex-wrap items-center justify-between gap-1.5 border-t border-slate-200/80 pt-2 dark:border-slate-700">
+                <span
+                  className={`inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[10px] font-black ${
+                    isUserOnShift
+                      ? 'bg-emerald-100 text-emerald-900 dark:bg-emerald-900/50 dark:text-emerald-300'
+                      : 'bg-amber-100 text-amber-900 dark:bg-amber-900/50 dark:text-amber-300'
+                  }`}
+                >
+                  <span
+                    className={`h-1.5 w-1.5 rounded-full ${
+                      isUserOnShift ? 'animate-pulse bg-emerald-600 dark:bg-emerald-400' : 'bg-amber-500'
+                    }`}
+                  />
+                  {isUserOnShift ? 'On Shift' : 'Off Shift'}
+                </span>
+                <span className="text-[10px] font-bold text-slate-500 dark:text-slate-400">
+                  {visibleHouses.length} Houses
+                </span>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
   return (
     <FarmContext.Provider value={contextValue}>
       <TabletPreviewShell
         tabletPreviewMode={tabletPreviewMode}
         setTabletPreviewMode={setTabletPreviewMode}
       >
-        <div className="app-bg-pattern min-h-screen pb-24 lg:pb-10">
+        <div
+          className={`app-bg-pattern relative flex min-h-screen flex-col ${
+            layoutMode === 'sidebar' ? 'pb-20 lg:pb-6' : 'pb-8'
+          }`}
+        >
           {/* Persistent Top App Bar */}
-          <header className="sticky top-0 z-30 border-b border-emerald-950/10 bg-white/95 shadow-sm backdrop-blur-md dark:border-slate-800 dark:bg-slate-900/95">
-            <div className="mx-auto flex max-w-[1440px] flex-wrap items-center justify-between gap-2.5 px-4 py-2.5 sm:px-6">
-              {/* Brand Identity */}
-              <button
-                type="button"
-                onClick={() => navigateTo(navItems[0]?.id || 'log')}
-                className="flex items-center gap-2.5 text-left"
-              >
-                <img
-                  src="/app-logo.png"
-                  alt="AlReefi Logo"
-                  className="h-10 w-10 rounded-xl object-contain"
-                />
-                <div>
-                  <h1 className="text-base font-black tracking-tight text-emerald-950 sm:text-lg dark:text-emerald-300">
-                    {langDict.appTitle}
-                  </h1>
-                  <p className="hidden text-[11px] font-bold text-emerald-700 sm:block dark:text-emerald-400">
-                    {actorName} ({activeUser.roleTitle})
-                  </p>
-                </div>
-              </button>
+          <header
+            ref={headerRef}
+            className="sticky top-0 z-30 border-b border-emerald-950/10 bg-white/95 shadow-sm backdrop-blur-md dark:border-slate-800 dark:bg-slate-900/95"
+          >
+            <div className="mx-auto flex max-w-[1600px] flex-wrap items-center justify-between gap-2.5 px-3 py-2.5 sm:px-6">
+              {/* Brand Identity + Sidebar Drawer Trigger + Live Clock & Date */}
+              <div className="flex min-w-0 flex-wrap items-center gap-2.5 sm:gap-3">
+                {layoutMode === 'sidebar' && (
+                  <button
+                    type="button"
+                    onClick={() => setMobileSidebarOpen(true)}
+                    aria-label="Open navigation sidebar"
+                    className={`${
+                      isPortraitPreview ? 'inline-flex' : 'inline-flex lg:hidden'
+                    } items-center gap-1.5 rounded-xl border border-emerald-200 bg-emerald-50 px-2.5 py-2 text-xs font-extrabold text-emerald-900 transition hover:bg-emerald-100 dark:border-emerald-800 dark:bg-emerald-950/60 dark:text-emerald-300`}
+                  >
+                    <Menu className="h-4 w-4" />
+                    <span className="hidden sm:inline">Menu</span>
+                  </button>
+                )}
 
-              {/* Desktop / Landscape Tablet Navigation */}
-              <nav className="hidden flex-wrap items-center gap-1 xl:flex">
-                {navItems.map((item) => {
-                  const Icon = item.icon;
-                  const active = currentNavView === item.id;
-                  return (
-                    <button
-                      key={item.id}
-                      type="button"
-                      onClick={() => navigateTo(item.id)}
-                      className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-extrabold transition ${
-                        active
-                          ? 'bg-emerald-800 text-white shadow-sm'
-                          : 'text-slate-700 hover:bg-emerald-50 hover:text-emerald-900 dark:text-slate-300 dark:hover:bg-slate-800 dark:hover:text-white'
-                      }`}
-                    >
-                      <Icon className="h-3.5 w-3.5" />
-                      {item.label}
-                    </button>
-                  );
-                })}
-              </nav>
+                <button
+                  type="button"
+                  onClick={() => navigateTo(navItems[0]?.id || 'log')}
+                  className="flex min-w-0 items-center gap-2.5 text-left"
+                >
+                  <img
+                    src="/app-logo.png"
+                    alt="AlReefi Logo"
+                    className="h-10 w-10 shrink-0 rounded-xl object-contain"
+                  />
+                  <div className="min-w-0">
+                    <h1 className="text-base font-black tracking-tight text-emerald-950 sm:text-lg dark:text-emerald-300">
+                      {langDict.appTitle}
+                    </h1>
+                    <p className="hidden text-[11px] font-bold text-emerald-700 sm:block dark:text-emerald-400">
+                      {actorName} ({activeUser.roleTitle})
+                    </p>
+                  </div>
+                </button>
 
-              {/* Right Controls: Theme, EN/AR, Tablet Test, Override, Emergency, End Shift, Logout */}
+                {/* Live Ticking Clock & Formatted Date next to Brand & Title */}
+                <LiveClockDateBadge nowClock={nowClock} activeLangCode={activeLangCode} />
+              </div>
+
+              {/* Right Utility Controls: Layout Switcher, Theme, EN/AR, Tablet View, SOS, End Shift, Logout */}
               <div className="flex flex-wrap items-center gap-1.5">
+                <LayoutModeSwitcher layoutMode={layoutMode} setLayoutMode={setLayoutMode} />
+
                 <ThemeTogglePill themeMode={themeMode} setThemeMode={setThemeMode} />
 
                 <button
@@ -2934,34 +3540,6 @@ export default function App() {
                   <Tablet className="h-3.5 w-3.5" />
                   <span className="hidden md:inline">Tablet View</span>
                 </button>
-
-                {userRole === 'owner' && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const next = !manualOverrideEnabled;
-                      setManualOverrideEnabled(next);
-                      notify(
-                        next
-                          ? 'Manual Override Mode ENABLED for Super Admin adjustments.'
-                          : 'Manual Override Mode disabled.',
-                        next ? 'warning' : 'success'
-                      );
-                    }}
-                    className={`hidden items-center gap-1 rounded-full px-3 py-1.5 text-[11px] font-extrabold transition sm:inline-flex ${
-                      manualOverrideEnabled
-                        ? 'bg-amber-500 text-white shadow-sm'
-                        : 'border border-amber-300 bg-amber-50 text-amber-900 hover:bg-amber-100 dark:border-amber-700 dark:bg-amber-900/30 dark:text-amber-300'
-                    }`}
-                  >
-                    {manualOverrideEnabled ? (
-                      <ShieldCheck className="h-3.5 w-3.5" />
-                    ) : (
-                      <ShieldAlert className="h-3.5 w-3.5" />
-                    )}
-                    Override {manualOverrideEnabled ? 'ON' : 'OFF'}
-                  </button>
-                )}
 
                 <button
                   type="button"
@@ -2996,39 +3574,173 @@ export default function App() {
               </div>
             </div>
 
-            {/* Compact Sub-Nav Strip for 1024-1279px screens */}
-            <div className="hidden border-t border-slate-100 px-4 py-1.5 lg:flex xl:hidden dark:border-slate-800">
-              <div className="mx-auto flex max-w-7xl flex-wrap items-center gap-1">
-                {navItems.map((item) => {
-                  const Icon = item.icon;
-                  const active = currentNavView === item.id;
-                  return (
-                    <button
-                      key={item.id}
-                      type="button"
-                      onClick={() => navigateTo(item.id)}
-                      className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-extrabold transition ${
-                        active
-                          ? 'bg-emerald-800 text-white shadow-sm'
-                          : 'text-slate-700 hover:bg-emerald-50 dark:text-slate-300 dark:hover:bg-slate-800'
-                      }`}
-                    >
-                      <Icon className="h-3.5 w-3.5" />
-                      {item.label}
-                    </button>
-                  );
-                })}
+            {/* Layout Mode B: Classic Enterprise Dropdown Menu Bar */}
+            {layoutMode === 'dropdown' && (
+              <div
+                ref={dropdownContainerRef}
+                className="border-t border-slate-100 bg-white/95 px-3 py-2 sm:px-6 dark:border-slate-800 dark:bg-slate-900/95"
+              >
+                <div className="relative mx-auto flex max-w-[1600px] flex-wrap items-center gap-2">
+                  {dropdownMenus.map((menu) => {
+                    const MenuIcon = menu.icon;
+                    const isOpen = openDropdownId === menu.id;
+                    const hasActiveChild =
+                      menu.type === 'nav' && menu.items.some((item) => item.id === currentNavView);
+
+                    return (
+                      <div key={menu.id} className="md:relative">
+                        <button
+                          type="button"
+                          onClick={() => setOpenDropdownId((prev) => (prev === menu.id ? null : menu.id))}
+                          aria-expanded={isOpen}
+                          className={`inline-flex items-center gap-1.5 rounded-xl border px-3 py-1.5 text-xs font-extrabold transition ${
+                            isOpen || hasActiveChild
+                              ? 'border-emerald-700 bg-emerald-800 text-white shadow-sm dark:border-emerald-500 dark:bg-emerald-600'
+                              : 'border-slate-200 bg-slate-50 text-slate-800 hover:border-emerald-300 hover:bg-emerald-50 dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200 dark:hover:bg-slate-700'
+                          }`}
+                        >
+                          <MenuIcon className="h-3.5 w-3.5 shrink-0" />
+                          <span>{menu.label}</span>
+                          <ChevronDown
+                            className={`h-3.5 w-3.5 shrink-0 transition-transform ${
+                              isOpen ? 'rotate-180' : ''
+                            }`}
+                          />
+                        </button>
+
+                        {isOpen && (
+                          <div
+                            className={`absolute top-full z-40 mt-2 max-h-[70vh] overflow-y-auto rounded-2xl border border-slate-200 bg-white p-2 shadow-2xl dark:border-slate-700 dark:bg-slate-900 ${
+                              menu.id === 'admin'
+                                ? 'left-0 right-0 md:left-auto md:right-0 md:w-72'
+                                : 'left-0 right-0 md:right-auto md:w-80'
+                            }`}
+                          >
+                            {menu.type === 'houses' ? (
+                              <div className="space-y-1">
+                                <p className="px-2.5 py-1 text-[10px] font-black tracking-wider text-slate-400 uppercase dark:text-slate-500">
+                                  Jump to Broiler House ({visibleHouses.length})
+                                </p>
+                                {visibleHouses.map((h) => {
+                                  const meta = getHouseStatusMeta(h);
+                                  const isSelected = selectedHouseId === h.id;
+                                  return (
+                                    <button
+                                      key={h.id}
+                                      type="button"
+                                      onClick={() => handleQuickJumpHouse(h.id)}
+                                      className={`flex w-full items-center gap-2.5 rounded-xl px-2.5 py-2 text-left transition ${
+                                        isSelected
+                                          ? 'bg-emerald-50 text-emerald-950 ring-1 ring-emerald-300 dark:bg-emerald-950/60 dark:text-emerald-100 dark:ring-emerald-700'
+                                          : 'text-slate-800 hover:bg-slate-100 dark:text-slate-200 dark:hover:bg-slate-800'
+                                      }`}
+                                    >
+                                      <div className="relative flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-emerald-50 text-emerald-800 ring-1 ring-emerald-200 dark:bg-slate-800 dark:text-emerald-300 dark:ring-slate-700">
+                                        <BroilerHouseSvgIcon isSilo={meta.isSilo} className="h-6 w-6" />
+                                        <span
+                                          className={`absolute -top-0.5 -right-0.5 h-2.5 w-2.5 rounded-full ${meta.dotClass}`}
+                                        />
+                                      </div>
+                                      <div className="min-w-0 flex-1">
+                                        <p className="truncate text-xs font-black">{h.name}</p>
+                                        <p className="truncate text-[11px] font-semibold text-slate-500 dark:text-slate-400">
+                                          {h.sector} • {meta.phaseText}
+                                        </p>
+                                      </div>
+                                      <span
+                                        className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-black ${
+                                          meta.isSilo
+                                            ? 'bg-indigo-100 text-indigo-900 dark:bg-indigo-900/50 dark:text-indigo-300'
+                                            : 'bg-amber-100 text-amber-900 dark:bg-amber-900/50 dark:text-amber-300'
+                                        }`}
+                                      >
+                                        {meta.feedBadge}
+                                      </span>
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            ) : (
+                              <div className="space-y-1">
+                                <p className="px-2.5 py-1 text-[10px] font-black tracking-wider text-slate-400 uppercase dark:text-slate-500">
+                                  {menu.label}
+                                </p>
+                                {menu.items.map((item) => {
+                                  const Icon = item.icon;
+                                  const active = currentNavView === item.id;
+                                  return (
+                                    <button
+                                      key={item.id}
+                                      type="button"
+                                      onClick={() => navigateTo(item.id)}
+                                      className={`flex w-full items-center justify-between gap-2 rounded-xl px-3 py-2 text-left text-xs font-extrabold transition ${
+                                        active
+                                          ? 'bg-emerald-800 text-white dark:bg-emerald-600'
+                                          : 'text-slate-800 hover:bg-emerald-50 hover:text-emerald-950 dark:text-slate-200 dark:hover:bg-slate-800'
+                                      }`}
+                                    >
+                                      <span className="flex items-center gap-2.5">
+                                        <Icon className="h-4 w-4 shrink-0" />
+                                        <span>{item.label}</span>
+                                      </span>
+                                      {active && <Check className="h-3.5 w-3.5 shrink-0" />}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
-            </div>
+            )}
+
+            {/* Layout Mode C: Modern Wrapping Icon Pill Bar */}
+            {layoutMode === 'topbar' && (
+              <nav
+                aria-label="Primary navigation"
+                className="border-t border-slate-100 bg-white/95 px-3 py-2 sm:px-6 dark:border-slate-800 dark:bg-slate-900/95"
+              >
+                <div className="mx-auto flex max-w-[1600px] flex-wrap items-center gap-1.5">
+                  {navItems.map((item) => {
+                    const Icon = item.icon;
+                    const active = currentNavView === item.id;
+                    return (
+                      <button
+                        key={item.id}
+                        type="button"
+                        onClick={() => navigateTo(item.id)}
+                        aria-current={active ? 'page' : undefined}
+                        className={`inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 text-xs font-extrabold transition ${
+                          active
+                            ? 'bg-emerald-800 text-white shadow-sm dark:bg-emerald-600'
+                            : 'border border-slate-200/80 bg-slate-50/80 text-slate-700 hover:border-emerald-300 hover:bg-emerald-50 hover:text-emerald-900 dark:border-slate-700 dark:bg-slate-800/80 dark:text-slate-200 dark:hover:bg-slate-700'
+                        }`}
+                      >
+                        <Icon className="h-3.5 w-3.5 shrink-0" />
+                        <span>{item.label}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              </nav>
+            )}
 
             {/* Global Telemetry & Day-Over-Day (+/-) Delta Bar for Management & Supervisors */}
             {(userRole === 'owner' || userRole === 'manager' || userRole === 'supervisor') && (
-              <div className="border-t border-slate-100 bg-slate-50/85 px-4 py-1.5 dark:border-slate-800 dark:bg-slate-950/60">
-                <div className="mx-auto flex max-w-[1440px] flex-wrap items-center justify-between gap-2 text-[11px] font-bold text-slate-700 dark:text-slate-300">
+              <div className="border-t border-slate-100 bg-slate-50/85 px-3 py-1.5 sm:px-6 dark:border-slate-800 dark:bg-slate-950/60">
+                <div className="mx-auto flex max-w-[1600px] flex-wrap items-center justify-between gap-2 text-[11px] font-bold text-slate-700 dark:text-slate-300">
                   <div className="flex flex-wrap items-center gap-2">
-                    <span className="inline-flex items-center gap-1 rounded-full bg-white px-2.5 py-0.5 text-slate-700 shadow-xs ring-1 ring-slate-200 dark:bg-slate-800 dark:text-slate-200 dark:ring-slate-700">
-                      <Clock className="h-3 w-3 text-emerald-700 dark:text-emerald-400" />
-                      {headerTelemetry.dateTimeLabel}
+                    <span className="inline-flex items-center gap-1.5 rounded-full bg-white px-2.5 py-0.5 text-slate-700 shadow-xs ring-1 ring-slate-200 dark:bg-slate-800 dark:text-slate-200 dark:ring-slate-700">
+                      <span
+                        className={`h-2 w-2 rounded-full ${
+                          liveSensorEnabled ? 'animate-pulse bg-emerald-500' : 'bg-slate-400'
+                        }`}
+                      />
+                      {liveSensorEnabled ? 'Live Telemetry' : 'Sensors Paused'}
                     </span>
                     <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100/80 px-2.5 py-0.5 font-extrabold text-emerald-950 dark:bg-emerald-900/40 dark:text-emerald-300">
                       Cycle #{headerTelemetry.activeCycleNum} • {headerTelemetry.flockAgeLabel}
@@ -3101,52 +3813,118 @@ export default function App() {
             )}
           </header>
 
-          {/* Main Content Viewport */}
-          <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6">
-            {currentNavView === 'hub' && <GlobalHub />}
-            {currentNavView === 'house' && <PoultryDashboard />}
-            {currentNavView === 'log' && <HealthResourceLog />}
-            {currentNavView === 'tasks' && <TaskVerification />}
-            {currentNavView === 'orders' && <OrdersAndBills />}
-            {currentNavView === 'weights' && <WeightsAndReports />}
-            {currentNavView === 'analytics' && <Analytics />}
-            {currentNavView === 'staff' && <StaffAttendance />}
-            {currentNavView === 'settings' && <StorageSettings />}
-            {currentNavView === 'crops' && <CropDashboard />}
-          </main>
+          {/* Body Layout Area */}
+          {layoutMode === 'sidebar' ? (
+            <div className="mx-auto flex w-full max-w-[1600px] min-w-0 flex-1">
+              {/* Desktop & Landscape Tablet Left Sidebar */}
+              <aside
+                style={{
+                  top: `${headerHeight}px`,
+                  maxHeight: tabletPreviewMode
+                    ? `calc(82vh - ${headerHeight}px)`
+                    : `calc(100vh - ${headerHeight}px)`,
+                }}
+                className={`${
+                  isPortraitPreview ? 'hidden' : 'hidden lg:flex'
+                } sticky shrink-0 flex-col border-e border-emerald-950/10 bg-white/90 backdrop-blur-md transition-all duration-200 dark:border-slate-800 dark:bg-slate-900/95 ${
+                  sidebarCollapsed ? 'w-20' : 'w-64'
+                }`}
+              >
+                {renderSidebarPanel({ isDrawer: false })}
+              </aside>
 
-          {/* Mobile / Tablet Portrait Bottom Navigation */}
-          <nav
-            className={`${
-              tabletPreviewMode ? 'sticky bottom-0' : 'fixed inset-x-0 bottom-0'
-            } z-30 flex items-center justify-around overflow-x-auto border-t border-slate-200 bg-white/95 px-2 py-2 shadow-lg backdrop-blur-md lg:hidden dark:border-slate-800 dark:bg-slate-900/95`}
-          >
-            {navItems.map((item) => {
-              const Icon = item.icon;
-              const active = currentNavView === item.id;
-              return (
-                <button
-                  key={item.id}
-                  type="button"
-                  onClick={() => navigateTo(item.id)}
-                  className={`flex shrink-0 flex-col items-center gap-0.5 rounded-xl px-2.5 py-1 text-[10px] font-extrabold transition ${
-                    active
-                      ? 'text-emerald-800 dark:text-emerald-400'
-                      : 'text-slate-500 dark:text-slate-400'
-                  }`}
+              {/* Mobile / Portrait Tablet Slide-Over Drawer */}
+              {mobileSidebarOpen && (
+                <div
+                  className={`${
+                    tabletPreviewMode ? 'absolute inset-0' : 'fixed inset-0'
+                  } z-40 flex items-start`}
                 >
-                  <Icon
-                    className={`h-5 w-5 ${
+                  <button
+                    type="button"
+                    aria-label="Close sidebar overlay"
+                    onClick={() => setMobileSidebarOpen(false)}
+                    className="absolute inset-0 bg-slate-950/60 backdrop-blur-[1px]"
+                  />
+                  <aside
+                    className={`relative z-10 flex w-72 max-w-[85vw] flex-col border-e border-slate-200 bg-white shadow-2xl dark:border-slate-800 dark:bg-slate-900 ${
+                      tabletPreviewMode ? 'sticky top-0 h-[82vh]' : 'h-full'
+                    }`}
+                  >
+                    {renderSidebarPanel({ isDrawer: true })}
+                  </aside>
+                </div>
+              )}
+
+              {/* Main Content Viewport */}
+              <main className="min-w-0 flex-1 px-4 py-6 sm:px-6">
+                <div className="mx-auto max-w-7xl">
+                  {currentNavView === 'hub' && <GlobalHub />}
+                  {currentNavView === 'house' && <PoultryDashboard />}
+                  {currentNavView === 'log' && <HealthResourceLog />}
+                  {currentNavView === 'tasks' && <TaskVerification />}
+                  {currentNavView === 'orders' && <OrdersAndBills />}
+                  {currentNavView === 'weights' && <WeightsAndReports />}
+                  {currentNavView === 'analytics' && <Analytics />}
+                  {currentNavView === 'staff' && <StaffAttendance />}
+                  {currentNavView === 'settings' && <StorageSettings />}
+                  {currentNavView === 'crops' && <CropDashboard />}
+                </div>
+              </main>
+            </div>
+          ) : (
+            <main className="mx-auto w-full max-w-7xl min-w-0 flex-1 px-4 py-6 sm:px-6">
+              {currentNavView === 'hub' && <GlobalHub />}
+              {currentNavView === 'house' && <PoultryDashboard />}
+              {currentNavView === 'log' && <HealthResourceLog />}
+              {currentNavView === 'tasks' && <TaskVerification />}
+              {currentNavView === 'orders' && <OrdersAndBills />}
+              {currentNavView === 'weights' && <WeightsAndReports />}
+              {currentNavView === 'analytics' && <Analytics />}
+              {currentNavView === 'staff' && <StaffAttendance />}
+              {currentNavView === 'settings' && <StorageSettings />}
+              {currentNavView === 'crops' && <CropDashboard />}
+            </main>
+          )}
+
+          {/* Mobile / Tablet Portrait Bottom Quick-Nav (Sidebar Mode only) */}
+          {layoutMode === 'sidebar' && (
+            <nav
+              className={`${
+                tabletPreviewMode ? 'sticky bottom-0' : 'fixed inset-x-0 bottom-0'
+              } ${
+                isPortraitPreview ? 'flex' : 'flex lg:hidden'
+              } z-30 items-center ${
+                navItems.length <= 4 ? 'justify-around' : 'justify-start gap-1 sm:justify-around'
+              } overflow-x-auto border-t border-slate-200 bg-white/95 px-2 py-2 shadow-lg backdrop-blur-md dark:border-slate-800 dark:bg-slate-900/95`}
+            >
+              {navItems.map((item) => {
+                const Icon = item.icon;
+                const active = currentNavView === item.id;
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => navigateTo(item.id)}
+                    className={`flex shrink-0 flex-col items-center gap-0.5 rounded-xl px-2.5 py-1 text-[10px] font-extrabold transition ${
                       active
                         ? 'text-emerald-800 dark:text-emerald-400'
                         : 'text-slate-500 dark:text-slate-400'
                     }`}
-                  />
-                  <span>{item.label}</span>
-                </button>
-              );
-            })}
-          </nav>
+                  >
+                    <Icon
+                      className={`h-5 w-5 ${
+                        active
+                          ? 'text-emerald-800 dark:text-emerald-400'
+                          : 'text-slate-500 dark:text-slate-400'
+                      }`}
+                    />
+                    <span className="whitespace-nowrap">{item.label}</span>
+                  </button>
+                );
+              })}
+            </nav>
+          )}
 
           {/* Global Persistent Emergency Modal */}
           <EmergencyModal />

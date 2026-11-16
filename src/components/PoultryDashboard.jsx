@@ -174,6 +174,158 @@ function EnvMetricCard({ icon: Icon, title, value, unit, status, targetText, pct
   );
 }
 
+function BroilerHouseSvgIcon({ className = 'h-12 w-12', isSilo = false, status = 'OPTIMAL' }) {
+  const accentColor =
+    status === 'INACTIVE'
+      ? '#64748b'
+      : status === 'CLEANING'
+      ? '#0284c7'
+      : status === 'ALERT'
+      ? '#dc2626'
+      : status === 'ATTENTION'
+      ? '#d97706'
+      : '#059669';
+
+  return (
+    <svg
+      viewBox="0 0 64 64"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      className={className}
+      aria-hidden="true"
+    >
+      {/* Concrete pad */}
+      <rect x="4" y="54" width="56" height="4" rx="2" fill="currentColor" opacity="0.22" />
+
+      {/* Feed silo silhouette (emphasized on silo-equipped houses) */}
+      <g opacity={isSilo ? 1 : 0.3}>
+        <path d="M49 20 L54 13 L59 20 Z" fill={isSilo ? '#4f46e5' : 'currentColor'} />
+        <rect
+          x="49"
+          y="20"
+          width="10"
+          height="21"
+          rx="1.5"
+          fill={isSilo ? '#6366f1' : 'currentColor'}
+          opacity={isSilo ? 0.9 : 0.55}
+        />
+        <path d="M49 41 L54 48 L59 41 Z" fill={isSilo ? '#4338ca' : 'currentColor'} />
+        <line x1="50" y1="44" x2="50" y2="54" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+        <line x1="58" y1="44" x2="58" y2="54" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+        <path d="M51 46 L44 36" stroke={isSilo ? '#4338ca' : 'currentColor'} strokeWidth="2.2" strokeLinecap="round" />
+      </g>
+
+      {/* Ridge vent / cupola */}
+      <rect x="21" y="9" width="12" height="5" rx="1.5" fill={accentColor} />
+      <path d="M19 10 L27 5 L35 10 Z" fill={accentColor} />
+      <line x1="23.5" y1="11.5" x2="30.5" y2="11.5" stroke="#ffffff" strokeWidth="1.4" strokeLinecap="round" />
+
+      {/* Barn frame */}
+      <path
+        d="M9 28 L27 14 L45 28 V54 H9 V28 Z"
+        fill="currentColor"
+        fillOpacity="0.1"
+        stroke="currentColor"
+        strokeWidth="2.4"
+        strokeLinejoin="round"
+      />
+
+      {/* Pitched roof overhang */}
+      <path
+        d="M5 29 L27 12 L49 29"
+        stroke={accentColor}
+        strokeWidth="3.2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+
+      {/* Side wall / cooling louvers */}
+      <rect
+        x="13"
+        y="34"
+        width="10"
+        height="10"
+        rx="1.8"
+        fill="currentColor"
+        fillOpacity="0.15"
+        stroke="currentColor"
+        strokeWidth="1.5"
+      />
+      <line x1="15" y1="37" x2="21" y2="37" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+      <line x1="15" y1="39.5" x2="21" y2="39.5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+      <line x1="15" y1="42" x2="21" y2="42" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+
+      {/* Circular exhaust fan with blades */}
+      <circle
+        cx="34"
+        cy="39"
+        r="6.5"
+        fill={accentColor}
+        fillOpacity="0.14"
+        stroke={accentColor}
+        strokeWidth="2"
+      />
+      <circle cx="34" cy="39" r="1.6" fill={accentColor} />
+      <path
+        d="M34 34.2 L35.4 37.5 M38.2 41.4 L35.2 39.8 M29.8 41.4 L32.8 39.8"
+        stroke={accentColor}
+        strokeWidth="1.6"
+        strokeLinecap="round"
+      />
+
+      {/* Barn access doors */}
+      <rect
+        x="21"
+        y="46"
+        width="12"
+        height="8"
+        rx="1"
+        fill={accentColor}
+        fillOpacity="0.22"
+        stroke="currentColor"
+        strokeWidth="1.5"
+      />
+      <line x1="27" y1="46" x2="27" y2="54" stroke="currentColor" strokeWidth="1.3" />
+    </svg>
+  );
+}
+
+function getHouseStatusBadgeMeta(status) {
+  if (status === 'INACTIVE') {
+    return {
+      label: 'INACTIVE',
+      badgeClass: 'bg-slate-700 text-white',
+      iconWrapClass: 'bg-slate-200 text-slate-700 dark:bg-slate-800 dark:text-slate-300',
+    };
+  }
+  if (status === 'CLEANING') {
+    return {
+      label: 'CLEANING',
+      badgeClass: 'bg-sky-700 text-white',
+      iconWrapClass: 'bg-sky-100 text-sky-900 dark:bg-sky-900/50 dark:text-sky-200',
+    };
+  }
+  if (status === 'ALERT') {
+    return {
+      label: 'ALERT',
+      badgeClass: 'bg-red-600 text-white',
+      iconWrapClass: 'bg-red-100 text-red-800 dark:bg-red-950/70 dark:text-red-200',
+    };
+  }
+  if (status === 'ATTENTION') {
+    return {
+      label: 'ATTENTION',
+      badgeClass: 'bg-amber-500 text-white',
+      iconWrapClass: 'bg-amber-100 text-amber-900 dark:bg-amber-950/70 dark:text-amber-200',
+    };
+  }
+  return {
+    label: 'OPTIMAL',
+    badgeClass: 'bg-emerald-600 text-white',
+    iconWrapClass: 'bg-emerald-100 text-emerald-900 dark:bg-emerald-950/70 dark:text-emerald-200',
+  };
+}
+
 export default function PoultryDashboard() {
   const {
     state,
@@ -184,6 +336,7 @@ export default function PoultryDashboard() {
     navigateTo,
     setIsEmergencyModalOpen,
     manualOverrideEnabled,
+    setManualOverrideEnabled,
     liveSensorEnabled,
     setLiveSensorEnabled,
     toggleHouseActive,
@@ -498,72 +651,64 @@ export default function PoultryDashboard() {
 
   return (
     <div className="space-y-6">
-      {/* Top House Switcher & Super Admin Status Header */}
-      <div className="flex flex-wrap items-center justify-between gap-3 rounded-3xl border border-slate-200 bg-white/95 p-4 shadow-sm backdrop-blur-sm">
-        <div className="flex items-center gap-3">
-          <button
-            type="button"
-            onClick={() => navigateTo('hub')}
-            className="inline-flex items-center gap-1.5 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-100"
-          >
-            <ArrowLeft className="h-4 w-4" />
-            Hub
-          </button>
-          <div>
-            <div className="flex flex-wrap items-center gap-2">
-              <h2 className="text-xl font-black text-slate-900">{house.name} Control</h2>
-              <span
-                className={`rounded-full px-2.5 py-0.5 text-[11px] font-extrabold uppercase ${
-                  isInactive
-                    ? 'bg-slate-700 text-white'
-                    : envEval.status === 'OPTIMAL'
-                    ? 'bg-emerald-600 text-white'
-                    : envEval.status === 'ATTENTION'
-                    ? 'bg-amber-500 text-white'
-                    : envEval.status === 'ALERT'
-                    ? 'bg-red-600 text-white'
-                    : 'bg-sky-700 text-white'
-                }`}
-              >
-                {isInactive ? 'INACTIVE' : envEval.status}
-              </span>
-              <span
-                className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-[11px] font-extrabold ${
-                  isSilo
-                    ? 'border-indigo-200 bg-indigo-50 text-indigo-800 dark:border-indigo-800 dark:bg-indigo-950/60 dark:text-indigo-200'
-                    : 'border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-800 dark:bg-amber-950/60 dark:text-amber-200'
-                }`}
-              >
-                {isSilo ? <Package className="h-3 w-3" /> : <Wheat className="h-3 w-3" />}
-                {isSilo ? `Silo-Based (${siloCapacityTons}T)` : `Bag-Based (${bagWeightKg}kg)`}
-              </span>
+      {/* Top House Control Header & Large Rectangular Broiler House Selection Cards */}
+      <div className="space-y-4 rounded-3xl border border-slate-200 bg-white/95 p-4 shadow-sm backdrop-blur-sm sm:p-5 dark:border-slate-700 dark:bg-slate-800/95">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-3">
+            <button
+              type="button"
+              onClick={() => navigateTo('hub')}
+              className="inline-flex items-center gap-1.5 rounded-2xl border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-bold text-slate-700 hover:bg-slate-100 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-700"
+            >
+              <ArrowLeft className="h-4 w-4" />
+              Hub
+            </button>
+            <div
+              className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl p-1.5 shadow-xs ${
+                getHouseStatusBadgeMeta(isInactive ? 'INACTIVE' : envEval.status).iconWrapClass
+              }`}
+            >
+              <BroilerHouseSvgIcon
+                className="h-10 w-10"
+                isSilo={isSilo}
+                status={isInactive ? 'INACTIVE' : envEval.status}
+              />
             </div>
-            <p className="text-xs font-medium text-slate-500">
-              {house.sector} • Cycle #{house.cycleNumber} • Started {house.cycleStartDate}
-            </p>
-          </div>
-        </div>
-
-        {/* House Quick Selector Pills + Super Admin Active/Inactive Toggle */}
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="flex flex-wrap items-center gap-1.5">
-            {selectableHouses.map((h) => (
-              <button
-                key={h.id}
-                type="button"
-                onClick={() => setSelectedHouseId(h.id)}
-                className={`rounded-full px-3 py-1.5 text-xs font-bold transition ${
-                  h.id === house.id
-                    ? 'bg-emerald-800 text-white shadow-sm'
-                    : h.isActive === false
-                    ? 'border border-dashed border-slate-300 bg-slate-100 text-slate-500 hover:bg-slate-200'
-                    : 'border border-slate-200 bg-slate-50 text-slate-700 hover:bg-emerald-50'
-                }`}
-              >
-                {h.code || h.name}
-                {h.isActive === false ? ' (Off)' : ''}
-              </button>
-            ))}
+            <div>
+              <div className="flex flex-wrap items-center gap-2">
+                <h2 className="text-xl font-black text-slate-900 dark:text-white">
+                  {house.name} Control
+                </h2>
+                <span
+                  className={`rounded-full px-2.5 py-0.5 text-[11px] font-extrabold uppercase ${
+                    isInactive
+                      ? 'bg-slate-700 text-white'
+                      : envEval.status === 'OPTIMAL'
+                      ? 'bg-emerald-600 text-white'
+                      : envEval.status === 'ATTENTION'
+                      ? 'bg-amber-500 text-white'
+                      : envEval.status === 'ALERT'
+                      ? 'bg-red-600 text-white'
+                      : 'bg-sky-700 text-white'
+                  }`}
+                >
+                  {isInactive ? 'INACTIVE' : envEval.status}
+                </span>
+                <span
+                  className={`inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-[11px] font-extrabold ${
+                    isSilo
+                      ? 'border-indigo-200 bg-indigo-50 text-indigo-800 dark:border-indigo-800 dark:bg-indigo-950/60 dark:text-indigo-200'
+                      : 'border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-800 dark:bg-amber-950/60 dark:text-amber-200'
+                  }`}
+                >
+                  {isSilo ? <Package className="h-3 w-3" /> : <Wheat className="h-3 w-3" />}
+                  {isSilo ? `Silo-Based (${siloCapacityTons}T)` : `Bag-Based (${bagWeightKg}kg)`}
+                </span>
+              </div>
+              <p className="text-xs font-medium text-slate-500 dark:text-slate-400">
+                {house.sector} • Cycle #{house.cycleNumber} • Started {house.cycleStartDate}
+              </p>
+            </div>
           </div>
 
           {isOwner && toggleHouseActive && (
@@ -573,13 +718,118 @@ export default function PoultryDashboard() {
               className={`inline-flex items-center gap-1.5 rounded-full px-3.5 py-1.5 text-xs font-extrabold shadow-sm transition ${
                 isInactive
                   ? 'bg-emerald-700 text-white hover:bg-emerald-800'
-                  : 'border border-slate-300 bg-slate-100 text-slate-800 hover:bg-slate-200'
+                  : 'border border-slate-300 bg-slate-100 text-slate-800 hover:bg-slate-200 dark:border-slate-600 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-700'
               }`}
             >
               <Power className="h-3.5 w-3.5" />
               {isInactive ? 'Reactivate House' : 'Set Inactive'}
             </button>
           )}
+        </div>
+
+        <div>
+          <p className="mb-2 text-xs font-extrabold tracking-wider text-slate-500 uppercase dark:text-slate-400">
+            Select Broiler House ({selectableHouses.length})
+          </p>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-[repeat(auto-fit,minmax(235px,1fr))]">
+            {selectableHouses.map((h) => {
+              const selected = h.id === house.id;
+              const hIsSilo = h.feedSystemType === 'silo';
+              const hBagKg = Number(h.bagWeightKg || 50);
+              const hSiloTons = Number(h.siloCapacityTons || 20);
+              const hEnv = evaluateHouseEnvironmentStatus(h, state.settings);
+              const hInv = calculateHouseInventory(h, chicksPerCarton, state.healthLogs || []);
+              const hAvgTemp = (
+                (Number(h.zones?.start || 0) +
+                  Number(h.zones?.middle || 0) +
+                  Number(h.zones?.end || 0)) /
+                3
+              ).toFixed(1);
+              const statusKey = h.isActive === false ? 'INACTIVE' : hEnv.status;
+              const statusMeta = getHouseStatusBadgeMeta(statusKey);
+
+              return (
+                <button
+                  key={h.id}
+                  type="button"
+                  onClick={() => setSelectedHouseId(h.id)}
+                  aria-pressed={selected}
+                  className={`flex flex-col justify-between gap-3 rounded-2xl border-2 p-4 text-left transition ${
+                    selected
+                      ? 'border-emerald-700 bg-emerald-50/90 shadow-md ring-2 ring-emerald-500/25 dark:border-emerald-400 dark:bg-emerald-950/55 dark:ring-emerald-400/20'
+                      : h.isActive === false
+                      ? 'border-dashed border-slate-300 bg-slate-100/80 text-slate-600 hover:border-slate-400 dark:border-slate-700 dark:bg-slate-900/50 dark:text-slate-300'
+                      : 'border-slate-200 bg-white/95 hover:border-emerald-400 hover:bg-emerald-50/35 dark:border-slate-700 dark:bg-slate-900/75 dark:hover:border-emerald-600 dark:hover:bg-slate-800/80'
+                  }`}
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex min-w-0 items-center gap-3">
+                      <div
+                        className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl p-1.5 shadow-xs ${statusMeta.iconWrapClass}`}
+                      >
+                        <BroilerHouseSvgIcon
+                          className="h-10 w-10"
+                          isSilo={hIsSilo}
+                          status={statusKey}
+                        />
+                      </div>
+                      <div className="min-w-0">
+                        <h3 className="truncate text-sm font-black text-slate-900 dark:text-white">
+                          {h.name}
+                        </h3>
+                        <p className="truncate text-xs font-semibold text-slate-600 dark:text-slate-300">
+                          {h.sector || 'Main Pad'} •{' '}
+                          {h.isActive === false
+                            ? 'Offline / Inactive'
+                            : h.phase === 'cleaning'
+                            ? `Cleaning (${h.cleaningDay}/${h.targetCleaningDays || 14})`
+                            : `Day ${h.cycleDay}/${h.targetCycleDays || 35}`}
+                        </p>
+                      </div>
+                    </div>
+
+                    {selected && (
+                      <span className="inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-emerald-700 text-white shadow-xs dark:bg-emerald-500">
+                        <CheckCircle2 className="h-4 w-4" />
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="flex flex-wrap items-center justify-between gap-2 border-t border-slate-200/80 pt-2.5 dark:border-slate-700/80">
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <span
+                        className={`rounded-full px-2.5 py-0.5 text-[10px] font-black tracking-wide uppercase ${statusMeta.badgeClass}`}
+                      >
+                        {statusMeta.label}
+                      </span>
+                      <span
+                        className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-extrabold ${
+                          hIsSilo
+                            ? 'border-indigo-200 bg-indigo-50 text-indigo-800 dark:border-indigo-800 dark:bg-indigo-950/60 dark:text-indigo-200'
+                            : 'border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-800 dark:bg-amber-950/60 dark:text-amber-200'
+                        }`}
+                      >
+                        {hIsSilo ? <Package className="h-3 w-3" /> : <Wheat className="h-3 w-3" />}
+                        {hIsSilo ? `${hSiloTons}T Silo` : `${hBagKg}kg Bags`}
+                      </span>
+                    </div>
+
+                    <div className="text-right text-xs font-extrabold tabular-nums text-slate-800 dark:text-slate-100">
+                      {h.isActive === false ? (
+                        <span className="text-slate-500 dark:text-slate-400">Standby</span>
+                      ) : h.phase === 'cleaning' ? (
+                        <span className="text-sky-700 dark:text-sky-300">Sanitation</span>
+                      ) : (
+                        <span>
+                          {hInv.activeChicks.toLocaleString()} birds • {hAvgTemp}°C
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </button>
+              );
+            })}
+          </div>
         </div>
       </div>
 
@@ -623,14 +873,14 @@ export default function PoultryDashboard() {
             </div>
 
             <div className="flex flex-wrap items-center gap-2">
-              {isOwner && manualOverrideEnabled && (
+              {isOwner && (
                 <button
                   type="button"
                   onClick={openOverride}
-                  className="inline-flex items-center gap-1.5 rounded-full border-2 border-amber-500 bg-amber-50 px-3.5 py-1.5 text-xs font-extrabold text-amber-900 hover:bg-amber-100 dark:bg-amber-950/60 dark:text-amber-200"
+                  className="inline-flex items-center gap-1.5 rounded-full border-2 border-amber-500 bg-amber-50 px-3.5 py-1.5 text-xs font-extrabold text-amber-900 transition hover:bg-amber-100 dark:border-amber-600 dark:bg-amber-950/60 dark:text-amber-200 dark:hover:bg-amber-900/60"
                 >
                   <ShieldCheck className="h-4 w-4 text-amber-700 dark:text-amber-400" />
-                  Edit Count / Cycle Day
+                  Super Admin Override: Edit Count / Cycle Day
                 </button>
               )}
 
@@ -733,19 +983,41 @@ export default function PoultryDashboard() {
                 )}
               </div>
               {isManagement && (
-                <button
-                  type="button"
-                  disabled={!allCleaningStepsVerified && !(isOwner && manualOverrideEnabled)}
-                  onClick={() => setShowNewCycleModal(true)}
-                  className={`inline-flex items-center gap-1.5 rounded-2xl px-4 py-2.5 text-xs font-extrabold transition ${
-                    allCleaningStepsVerified || (isOwner && manualOverrideEnabled)
-                      ? 'bg-emerald-800 text-white shadow-sm hover:bg-emerald-900'
-                      : 'cursor-not-allowed bg-slate-200 text-slate-500'
-                  }`}
-                >
-                  <PackagePlus className="h-4 w-4" />
-                  Start New Flock Cycle
-                </button>
+                <div className="flex flex-wrap items-center gap-2">
+                  {isOwner && (
+                    <button
+                      type="button"
+                      onClick={() => setManualOverrideEnabled(!manualOverrideEnabled)}
+                      className={`inline-flex items-center gap-1.5 rounded-2xl border-2 px-3.5 py-2 text-xs font-extrabold transition ${
+                        manualOverrideEnabled
+                          ? 'border-amber-500 bg-amber-500 text-white shadow-sm hover:bg-amber-600'
+                          : 'border-amber-400 bg-amber-50 text-amber-900 hover:bg-amber-100 dark:border-amber-700 dark:bg-amber-950/60 dark:text-amber-200 dark:hover:bg-amber-900/60'
+                      }`}
+                    >
+                      {manualOverrideEnabled ? (
+                        <Unlock className="h-4 w-4" />
+                      ) : (
+                        <ShieldCheck className="h-4 w-4" />
+                      )}
+                      {manualOverrideEnabled
+                        ? 'Super Admin Override Active: Cleaning Gate Bypassed'
+                        : 'Super Admin Override: Bypass Cleaning Gate / Unlock All Steps'}
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    disabled={!allCleaningStepsVerified && !(isOwner && manualOverrideEnabled)}
+                    onClick={() => setShowNewCycleModal(true)}
+                    className={`inline-flex items-center gap-1.5 rounded-2xl px-4 py-2.5 text-xs font-extrabold transition ${
+                      allCleaningStepsVerified || (isOwner && manualOverrideEnabled)
+                        ? 'bg-emerald-800 text-white shadow-sm hover:bg-emerald-900'
+                        : 'cursor-not-allowed bg-slate-200 text-slate-500 dark:bg-slate-800 dark:text-slate-400'
+                    }`}
+                  >
+                    <PackagePlus className="h-4 w-4" />
+                    Start New Flock Cycle
+                  </button>
+                </div>
               )}
             </div>
           )}
@@ -1156,18 +1428,40 @@ export default function PoultryDashboard() {
                 </p>
               </div>
             </div>
-            {allCleaningStepsVerified && (
-              <button
-                type="button"
-                onClick={() => {
-                  finishCleaningAndReadyHouse?.(house.id);
-                  setShowNewCycleModal(true);
-                }}
-                className="rounded-full bg-emerald-700 px-4 py-2 text-xs font-extrabold text-white shadow-sm hover:bg-emerald-800"
-              >
-                All Steps Verified — Open New Cycle Setup
-              </button>
-            )}
+            <div className="flex flex-wrap items-center gap-2">
+              {isOwner && (
+                <button
+                  type="button"
+                  onClick={() => setManualOverrideEnabled(!manualOverrideEnabled)}
+                  className={`inline-flex items-center gap-1.5 rounded-full border-2 px-3.5 py-1.5 text-xs font-extrabold transition ${
+                    manualOverrideEnabled
+                      ? 'border-amber-500 bg-amber-500 text-white shadow-sm hover:bg-amber-600'
+                      : 'border-amber-400 bg-amber-50 text-amber-900 hover:bg-amber-100 dark:border-amber-700 dark:bg-amber-950/60 dark:text-amber-200 dark:hover:bg-amber-900/60'
+                  }`}
+                >
+                  {manualOverrideEnabled ? (
+                    <Unlock className="h-3.5 w-3.5" />
+                  ) : (
+                    <ShieldCheck className="h-3.5 w-3.5" />
+                  )}
+                  {manualOverrideEnabled
+                    ? 'Super Admin Override Active: All Steps Unlocked'
+                    : 'Super Admin Override: Bypass Cleaning Gate / Unlock All Steps'}
+                </button>
+              )}
+              {allCleaningStepsVerified && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    finishCleaningAndReadyHouse?.(house.id);
+                    setShowNewCycleModal(true);
+                  }}
+                  className="rounded-full bg-emerald-700 px-4 py-2 text-xs font-extrabold text-white shadow-sm hover:bg-emerald-800"
+                >
+                  All Steps Verified — Open New Cycle Setup
+                </button>
+              )}
+            </div>
           </div>
 
           <div className="space-y-3">
@@ -1187,8 +1481,8 @@ export default function PoultryDashboard() {
                       : step.status === 'awaiting_verification'
                       ? 'border-amber-300 bg-amber-50/70 dark:border-amber-800 dark:bg-amber-950/30'
                       : isUnlocked
-                      ? 'border-sky-300 bg-white dark:border-sky-800'
-                      : 'border-slate-200 bg-slate-100/75 opacity-75'
+                      ? 'border-sky-300 bg-white dark:border-sky-800 dark:bg-slate-900/70'
+                      : 'border-slate-200 bg-slate-100/75 opacity-75 dark:border-slate-700 dark:bg-slate-900/40'
                   }`}
                 >
                   <div className="flex flex-col justify-between gap-3 sm:flex-row sm:items-start">
@@ -1201,7 +1495,7 @@ export default function PoultryDashboard() {
                             ? 'bg-amber-500 text-white'
                             : isUnlocked
                             ? 'bg-sky-700 text-white'
-                            : 'bg-slate-300 text-slate-600'
+                            : 'bg-slate-300 text-slate-600 dark:bg-slate-700 dark:text-slate-300'
                         }`}
                       >
                         {step.status === 'verified' ? (
@@ -1214,14 +1508,14 @@ export default function PoultryDashboard() {
                       </div>
                       <div>
                         <div className="flex flex-wrap items-center gap-2">
-                          <h4 className="text-sm font-extrabold text-slate-900">
+                          <h4 className="text-sm font-extrabold text-slate-900 dark:text-white">
                             {step.stepNumber}. {step.title}
                           </h4>
-                          <span className="rounded-full border border-slate-200 bg-white/90 px-2.5 py-0.5 text-[10px] font-extrabold tracking-wide text-slate-700 uppercase">
+                          <span className="rounded-full border border-slate-200 bg-white/90 px-2.5 py-0.5 text-[10px] font-extrabold tracking-wide text-slate-700 uppercase dark:border-slate-700 dark:bg-slate-800 dark:text-slate-200">
                             {step.status.replace('_', ' ')}
                           </span>
                           {!isUnlocked && (
-                            <span className="inline-flex items-center gap-1 text-[11px] font-bold text-slate-500">
+                            <span className="inline-flex items-center gap-1 text-[11px] font-bold text-slate-500 dark:text-slate-400">
                               <Lock className="h-3 w-3" /> Locked until Step {step.stepNumber - 1} verified
                             </span>
                           )}
@@ -1229,13 +1523,15 @@ export default function PoultryDashboard() {
                             manualOverrideEnabled &&
                             !(idx === 0 || prevStep?.status === 'verified') && (
                               <span className="inline-flex items-center gap-1 text-[11px] font-bold text-amber-700 dark:text-amber-400">
-                                <Unlock className="h-3 w-3" /> Owner Override Unlocked
+                                <Unlock className="h-3 w-3" /> Super Admin Override Unlocked
                               </span>
                             )}
                         </div>
-                        <p className="mt-1 text-xs text-slate-600">{step.description}</p>
+                        <p className="mt-1 text-xs text-slate-600 dark:text-slate-300">
+                          {step.description}
+                        </p>
                         {step.note && (
-                          <p className="mt-2 rounded-xl border border-slate-200/70 bg-white/80 px-3 py-1.5 text-xs font-medium text-slate-800">
+                          <p className="mt-2 rounded-xl border border-slate-200/70 bg-white/80 px-3 py-1.5 text-xs font-medium text-slate-800 dark:border-slate-700 dark:bg-slate-800/80 dark:text-slate-200">
                             Note: {step.note}
                           </p>
                         )}

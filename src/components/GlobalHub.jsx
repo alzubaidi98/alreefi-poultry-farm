@@ -18,7 +18,6 @@ import {
   Package,
   Pill,
   Power,
-  ShieldCheck,
   Skull,
   Sparkles,
   ThermometerSun,
@@ -79,6 +78,123 @@ function MiniSemiGauge({ tempC, status }) {
   );
 }
 
+function BroilerHouseSvgIcon({ className = 'h-12 w-12', isSilo = false, status = 'OPTIMAL' }) {
+  const accentColor =
+    status === 'INACTIVE'
+      ? '#64748b'
+      : status === 'CLEANING'
+      ? '#0284c7'
+      : status === 'ALERT'
+      ? '#dc2626'
+      : status === 'ATTENTION'
+      ? '#d97706'
+      : '#059669';
+
+  return (
+    <svg
+      viewBox="0 0 64 64"
+      fill="none"
+      xmlns="http://www.w3.org/2000/svg"
+      className={className}
+      aria-hidden="true"
+    >
+      <rect x="4" y="54" width="56" height="4" rx="2" fill="currentColor" opacity="0.22" />
+      <g opacity={isSilo ? 1 : 0.3}>
+        <path d="M49 20 L54 13 L59 20 Z" fill={isSilo ? '#4f46e5' : 'currentColor'} />
+        <rect
+          x="49"
+          y="20"
+          width="10"
+          height="21"
+          rx="1.5"
+          fill={isSilo ? '#6366f1' : 'currentColor'}
+          opacity={isSilo ? 0.9 : 0.55}
+        />
+        <path d="M49 41 L54 48 L59 41 Z" fill={isSilo ? '#4338ca' : 'currentColor'} />
+        <line x1="50" y1="44" x2="50" y2="54" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+        <line x1="58" y1="44" x2="58" y2="54" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+        <path d="M51 46 L44 36" stroke={isSilo ? '#4338ca' : 'currentColor'} strokeWidth="2.2" strokeLinecap="round" />
+      </g>
+      <rect x="21" y="9" width="12" height="5" rx="1.5" fill={accentColor} />
+      <path d="M19 10 L27 5 L35 10 Z" fill={accentColor} />
+      <line x1="23.5" y1="11.5" x2="30.5" y2="11.5" stroke="#ffffff" strokeWidth="1.4" strokeLinecap="round" />
+      <path
+        d="M9 28 L27 14 L45 28 V54 H9 V28 Z"
+        fill="currentColor"
+        fillOpacity="0.1"
+        stroke="currentColor"
+        strokeWidth="2.4"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M5 29 L27 12 L49 29"
+        stroke={accentColor}
+        strokeWidth="3.2"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <rect
+        x="13"
+        y="34"
+        width="10"
+        height="10"
+        rx="1.8"
+        fill="currentColor"
+        fillOpacity="0.15"
+        stroke="currentColor"
+        strokeWidth="1.5"
+      />
+      <line x1="15" y1="37" x2="21" y2="37" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+      <line x1="15" y1="39.5" x2="21" y2="39.5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+      <line x1="15" y1="42" x2="21" y2="42" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
+      <circle
+        cx="34"
+        cy="39"
+        r="6.5"
+        fill={accentColor}
+        fillOpacity="0.14"
+        stroke={accentColor}
+        strokeWidth="2"
+      />
+      <circle cx="34" cy="39" r="1.6" fill={accentColor} />
+      <path
+        d="M34 34.2 L35.4 37.5 M38.2 41.4 L35.2 39.8 M29.8 41.4 L32.8 39.8"
+        stroke={accentColor}
+        strokeWidth="1.6"
+        strokeLinecap="round"
+      />
+      <rect
+        x="21"
+        y="46"
+        width="12"
+        height="8"
+        rx="1"
+        fill={accentColor}
+        fillOpacity="0.22"
+        stroke="currentColor"
+        strokeWidth="1.5"
+      />
+      <line x1="27" y1="46" x2="27" y2="54" stroke="currentColor" strokeWidth="1.3" />
+    </svg>
+  );
+}
+
+function getHouseIconWrapClass(status) {
+  if (status === 'INACTIVE') {
+    return 'bg-slate-200 text-slate-700 dark:bg-slate-800 dark:text-slate-300';
+  }
+  if (status === 'CLEANING') {
+    return 'bg-sky-100 text-sky-900 dark:bg-sky-900/50 dark:text-sky-200';
+  }
+  if (status === 'ALERT') {
+    return 'bg-red-100 text-red-800 dark:bg-red-950/70 dark:text-red-200';
+  }
+  if (status === 'ATTENTION') {
+    return 'bg-amber-100 text-amber-900 dark:bg-amber-950/70 dark:text-amber-200';
+  }
+  return 'bg-emerald-100 text-emerald-900 dark:bg-emerald-950/70 dark:text-emerald-200';
+}
+
 export default function GlobalHub() {
   const {
     state,
@@ -92,7 +208,6 @@ export default function GlobalHub() {
     executeMedicationTask,
     toggleHouseActive,
     navigateTo,
-    manualOverrideEnabled,
   } = useFarm();
 
   const currentUser = activeUser || activeWorker;
@@ -414,18 +529,6 @@ export default function GlobalHub() {
             </div>
           </div>
         </section>
-      )}
-
-      {/* Owner Manual Override Banner */}
-      {isOwner && manualOverrideEnabled && (
-        <div className="flex items-center justify-between rounded-2xl border border-amber-300 bg-amber-50/95 px-4 py-3 text-amber-950 shadow-sm dark:border-amber-700 dark:bg-amber-950/50 dark:text-amber-200">
-          <div className="flex items-center gap-2.5 text-sm font-bold">
-            <ShieldCheck className="h-5 w-5 shrink-0 text-amber-700 dark:text-amber-400" />
-            <span>
-              Super Admin Manual Override Mode is ACTIVE — You can directly edit active bird counts, locked shift logs, cycle days, or unlock sequential cleaning steps.
-            </span>
-          </div>
-        </div>
       )}
 
       {/* Pinned Live Header Bar (Management & Supervisor) */}
@@ -1194,19 +1297,34 @@ export default function GlobalHub() {
             return (
               <article
                 key={house.id}
-                className="flex min-w-[310px] max-w-[350px] shrink-0 snap-start flex-col justify-between rounded-3xl border border-slate-200/90 bg-white/95 p-5 shadow-sm backdrop-blur-sm transition hover:border-emerald-400 hover:shadow-md"
+                className="flex min-w-[280px] max-w-[355px] shrink-0 snap-start flex-col justify-between rounded-3xl border border-slate-200/90 bg-white/95 p-5 shadow-sm backdrop-blur-sm transition hover:border-emerald-400 hover:shadow-md sm:min-w-[315px] dark:border-slate-700 dark:bg-slate-800/95"
               >
                 <div>
-                  {/* Header row */}
-                  <div className="flex items-start justify-between gap-2">
-                    <div>
-                      <h3 className="text-lg font-extrabold text-slate-900">{house.name}</h3>
-                      <p className="text-xs font-medium text-slate-500">
-                        {house.sector} • Cycle #{house.cycleNumber}
-                      </p>
+                  {/* Header row with Broiler House SVG Icon */}
+                  <div className="flex items-start justify-between gap-2.5">
+                    <div className="flex min-w-0 items-center gap-3">
+                      <div
+                        className={`flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl p-1.5 shadow-xs ${getHouseIconWrapClass(
+                          envEval.status
+                        )}`}
+                      >
+                        <BroilerHouseSvgIcon
+                          className="h-10 w-10"
+                          isSilo={isSilo}
+                          status={envEval.status}
+                        />
+                      </div>
+                      <div className="min-w-0">
+                        <h3 className="truncate text-base font-extrabold text-slate-900 dark:text-white">
+                          {house.name}
+                        </h3>
+                        <p className="truncate text-xs font-medium text-slate-500 dark:text-slate-400">
+                          {house.sector} • Cycle #{house.cycleNumber}
+                        </p>
+                      </div>
                     </div>
                     <span
-                      className={`rounded-full border px-2.5 py-0.5 text-[11px] font-bold ${phasePillStyles}`}
+                      className={`shrink-0 rounded-full border px-2.5 py-0.5 text-[11px] font-bold ${phasePillStyles}`}
                     >
                       {house.phase === 'cleaning'
                         ? `Cleaning: Day ${house.cleaningDay}/${house.targetCleaningDays || 14}`
@@ -1423,12 +1541,23 @@ export default function GlobalHub() {
                 return (
                   <div
                     key={h.id}
-                    className="flex flex-col justify-between gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-4"
+                    className="flex flex-col justify-between gap-3 rounded-2xl border border-slate-200 bg-slate-50 p-4 dark:border-slate-700 dark:bg-slate-900/70"
                   >
                     <div>
-                      <div className="flex items-center justify-between gap-2">
-                        <h4 className="text-sm font-extrabold text-slate-900">{h.name}</h4>
-                        <span className="rounded-full bg-slate-700 px-2.5 py-0.5 text-[10px] font-extrabold text-white uppercase">
+                      <div className="flex items-center justify-between gap-2.5">
+                        <div className="flex min-w-0 items-center gap-2.5">
+                          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-slate-200 p-1 text-slate-700 dark:bg-slate-800 dark:text-slate-300">
+                            <BroilerHouseSvgIcon
+                              className="h-8 w-8"
+                              isSilo={isSilo}
+                              status="INACTIVE"
+                            />
+                          </div>
+                          <h4 className="truncate text-sm font-extrabold text-slate-900 dark:text-white">
+                            {h.name}
+                          </h4>
+                        </div>
+                        <span className="shrink-0 rounded-full bg-slate-700 px-2.5 py-0.5 text-[10px] font-extrabold text-white uppercase">
                           INACTIVE
                         </span>
                       </div>
